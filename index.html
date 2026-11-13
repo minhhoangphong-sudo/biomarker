@@ -1,0 +1,2204 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Biomarker ML</title>
+<meta name="description" content="Mô phỏng 3D xoay 360° về quy trình phân tích biểu hiện gen bằng RNA-Seq để tìm dấu ấn sinh học.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600&family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Bố cục: bàn quay 3D bên trái, danh sách bước bên phải, các phần đọc nằm dưới.
+     Một thế giới tối kiểu kính hiển vi huỳnh quang, chọn có chủ đích nên chỉ có một giao diện. */
+  --ink:#090e1c;
+  --ink-2:#101830;
+  --ink-3:#18223f;
+  --line:#27345a;
+  --text:#e9edf8;
+  --soft:#cdd5e9;
+  --muted:#97a3c2;
+  --up:#ff7061;
+  --down:#45b8ff;
+  --signal:#ffc44d;
+  --ok:#7fdcae;
+  --hi:#e66767;
+  --lo:#3987e5;
+  --mid:#8b93a8;
+  --grid:#222d50;
+  --gut:clamp(16px,3.2vw,36px);
+  --font-display:"Bricolage Grotesque","Be Vietnam Pro",system-ui,sans-serif;
+  --font-body:"Be Vietnam Pro",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--ink);color:var(--text);font:400 16px/1.62 var(--font-body)}
+a{color:var(--down);text-underline-offset:3px}
+a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+code,.mono{font-family:var(--font-mono);font-size:.92em}
+
+.page{display:block;max-width:1240px;margin:0 auto;padding:clamp(22px,4vw,46px) var(--gut) 64px}
+.screen{display:flex;flex-direction:column;gap:clamp(28px,4vw,44px)}
+.screen[hidden]{display:none}
+h1:focus{outline:none}
+
+/* Đầu trang */
+.mast{display:flex;flex-direction:column;gap:12px;max-width:800px}
+.eyebrow{margin:0;font:600 12px/1.4 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
+h1{margin:0;font:700 clamp(30px,4.6vw,52px)/1.14 var(--font-display);letter-spacing:-.015em;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:clamp(16px,1.6vw,18px);max-width:62ch}
+
+/* Sân khấu 3D */
+.stage{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr);gap:20px;align-items:start}
+.view{display:flex;flex-direction:column;gap:12px;min-width:0}
+.canvas-wrap{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#070b17;aspect-ratio:5/4;min-height:400px;max-height:720px}
+#scene{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:pan-y;cursor:grab}
+#scene:active{cursor:grabbing}
+#scene:focus-visible{outline:2px solid var(--signal);outline-offset:-3px}
+.legend{position:absolute;left:14px;top:12px;right:14px;margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;color:var(--muted);pointer-events:none}
+.legend li{display:flex;align-items:center;gap:7px}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.dot.up{background:var(--up)}.dot.down{background:var(--down)}.dot.signal{background:var(--signal)}
+.hint{position:absolute;right:14px;bottom:12px;left:96px;margin:0;font-size:12.5px;line-height:1.45;color:var(--muted);pointer-events:none;text-align:right}
+.hint .touch{display:none}
+@media (hover:none) and (pointer:coarse){.hint .mouse{display:none}.hint .touch{display:inline}}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{font:600 14px/1 var(--font-body);color:var(--text);background:var(--ink-2);border:1px solid var(--line);border-radius:9px;padding:11px 14px;cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--signal);border-color:var(--signal);color:#1b1404}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn[aria-pressed="true"]{border-color:var(--signal);color:var(--signal)}
+.btn.sq{width:40px;padding:11px 0;text-align:center;font-family:var(--font-mono);font-size:16px}
+.spacer{flex:1 1 0}
+
+/* Danh sách bước */
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;background:var(--ink-2);overflow:hidden}
+.step+.step{border-top:1px solid var(--line)}
+.step.is-on{background:var(--ink-3);box-shadow:inset 3px 0 0 var(--signal)}
+.step-head{appearance:none;background:none;border:0;color:inherit;font:inherit;text-align:left;display:grid;grid-template-columns:40px minmax(0,1fr);gap:2px 10px;width:100%;padding:14px 16px;cursor:pointer}
+.step-head:focus-visible{outline-offset:-3px}
+.step-num{grid-row:1/3;font:600 13px/1.6 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.step.is-on .step-num{color:var(--signal)}
+.step-title{font:600 16px/1.38 var(--font-body)}
+.step-sum{font-size:13.5px;line-height:1.5;color:var(--muted)}
+.step-body{padding:0 16px 18px 66px;display:flex;flex-direction:column;gap:12px;font-size:14.5px;line-height:1.62;color:var(--soft)}
+.step-body[hidden]{display:none}
+.step-body p,.step-body ul,.step-body ol,.step-body dl{margin:0}
+.step-body ol,.step-body ul{padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0 !important;flex-direction:row !important}
+.chips li{font:600 12px/1 var(--font-mono);border:1px solid var(--line);border-radius:6px;padding:6px 8px;color:var(--text)}
+.note{font-size:13px;line-height:1.55;color:var(--muted)}
+
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;align-self:flex-start}
+.seg-btn{appearance:none;border:0;background:transparent;color:var(--muted);font:600 13.5px/1 var(--font-body);padding:10px 14px;cursor:pointer}
+.seg-btn+.seg-btn{border-left:1px solid var(--line)}
+.seg-btn.is-on{background:var(--signal);color:#1b1404}
+
+.bars{display:flex;flex-direction:column;gap:8px}
+.bar{display:grid;grid-template-columns:72px minmax(0,1fr) 34px;gap:10px;align-items:center}
+.bar dt{font:600 12.5px/1 var(--font-mono)}
+.bar dd{margin:0;display:contents}
+.track{height:8px;border-radius:4px;background:#0b1226;overflow:hidden;display:block}
+.track i{display:block;height:100%;border-radius:4px;width:10%;transition:width .5s ease}
+.bar b{font:600 12.5px/1 var(--font-mono);text-align:right;font-variant-numeric:tabular-nums}
+
+.ctl{display:flex;flex-direction:column;gap:6px}
+.ctl label{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;color:var(--text)}
+.ctl output{font:600 13px/1.5 var(--font-mono);color:var(--signal);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--signal);margin:0;height:22px}
+.counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.counts div{border:1px solid var(--line);border-radius:9px;padding:9px 10px;display:flex;flex-direction:column;gap:2px}
+.counts dt{font-size:12px;color:var(--muted);line-height:1.3}
+.counts dd{margin:0;font:600 20px/1.2 var(--font-mono);font-variant-numeric:tabular-nums}
+.counts .c-up dd{color:var(--up)}.counts .c-down dd{color:var(--down)}
+
+.roc{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+#roc{width:168px;height:168px;flex:none}
+.roc-read{display:flex;flex-direction:column;gap:4px;min-width:120px;flex:1}
+.roc-read .big{font:700 34px/1 var(--font-display);color:var(--signal);font-variant-numeric:tabular-nums}
+.roc-read .cap{font-size:12.5px;color:var(--muted);line-height:1.4}
+.roc-read .mono{font-size:11.5px;line-height:1.6;color:var(--text);word-break:break-word}
+
+/* Các phần đọc */
+
+
+
+
+.sources{display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--line);padding-top:22px;font-size:14.5px;color:var(--soft)}
+.sources h2{margin:0;font:700 20px/1.3 var(--font-display)}
+.sources ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.sources p{max-width:78ch}
+
+/* Giai đoạn 2: ứng dụng dự đoán */
+#du-doan{scroll-margin-top:16px}
+.mast .btn{align-self:flex-start;text-decoration:none;display:inline-block;margin-top:4px}
+.phases{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 44px}
+.phases li{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:14px;color:var(--soft);font-size:15px;line-height:1.6}
+.phases strong{color:var(--text);font-weight:600;font-size:16.5px;line-height:1.4}
+.ph-tag{font:600 12px/1.4 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.phases li.now{border-top-color:var(--signal)}
+.phases li.now .ph-tag{color:var(--signal)}
+
+.app{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+.app-in{display:flex;flex-direction:column;gap:20px;min-width:0}
+.block{border:1px solid var(--line);border-radius:14px;background:var(--ink-2);padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.block h2{margin:0;font:600 17px/1.35 var(--font-body);display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.block h2 .k{font:600 12px/1.4 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--signal)}
+.block .note,.app-out .note{margin:0;max-width:none}
+.drop{position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;border:1.5px dashed var(--line);border-radius:10px;padding:18px 14px;cursor:pointer;text-align:center;background:#0b1226}
+.drop:hover,.drop.is-over{border-color:var(--signal)}
+.drop:focus-within{outline:2px solid var(--signal);outline-offset:2px}
+.drop input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.drop-main{font-weight:600}
+.drop-sub{font-size:13px;color:var(--muted)}
+.check{display:flex;gap:9px;align-items:flex-start;font-size:13.5px;line-height:1.5;color:var(--soft);cursor:pointer}
+.check input{accent-color:var(--signal);margin:3px 0 0;width:16px;height:16px;flex:none}
+.status{margin:0;font-size:13.5px;line-height:1.5;max-width:none}
+.status:empty{display:none}
+.status.ok{color:var(--ok)}
+.status.bad{color:var(--up)}
+.sample{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sample-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 10px;padding:8px 10px 8px 12px;font:600 12px/1.4 var(--font-mono);color:var(--muted);border-bottom:1px solid var(--line)}
+.sample-btns{display:flex;flex-wrap:wrap;gap:6px}
+.sample pre{margin:0;padding:12px;font:500 12.5px/1.6 var(--font-mono);overflow-x:auto;color:var(--text);background:#0b1226}
+.btn.sm{padding:8px 10px;font-size:12.5px}
+#pform{display:flex;flex-direction:column;gap:14px}
+.grows{display:flex;flex-direction:column;gap:8px}
+.grow{display:grid;grid-template-columns:70px minmax(0,1fr) 78px;gap:12px;align-items:center}
+.gname{font:600 12.5px/1 var(--font-mono)}
+.grow input[type=number]{width:100%;font:600 14px/1 var(--font-mono);color:var(--text);background:#0b1226;border:1px solid var(--line);border-radius:8px;padding:9px 8px;text-align:right;font-variant-numeric:tabular-nums}
+.grow input[type=number]:invalid{border-color:var(--up)}
+.presets{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;color:var(--muted)}
+.presets span{margin-right:4px}
+.presets button{appearance:none;font:500 13px/1 var(--font-body);color:var(--text);background:transparent;border:1px solid var(--line);border-radius:999px;padding:8px 12px;cursor:pointer}
+.presets button:hover{border-color:var(--muted)}
+#btnPredict{padding:15px 34px;font-size:16px}
+
+.app-out{--state:var(--line);border:1px solid var(--line);border-radius:14px;background:var(--ink-3);padding:20px 20px 20px 24px;display:flex;flex-direction:column;gap:14px;box-shadow:inset 4px 0 0 var(--state);min-width:0}
+.app-out.hi{--state:var(--up)}
+.app-out.lo{--state:var(--down)}
+.verdict{margin:0;font:700 clamp(26px,3.2vw,36px)/1.18 var(--font-display);color:var(--state);max-width:none}
+.verdict span{font-weight:500;color:var(--soft);font-size:.6em;white-space:nowrap}
+.prob{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.prob-num{font:700 46px/1 var(--font-display);font-variant-numeric:tabular-nums}
+.prob-cap{font-size:13.5px;color:var(--muted);max-width:24ch;line-height:1.45}
+.split{display:flex;height:14px;border-radius:7px;overflow:hidden;background:#0b1226;gap:2px}
+.split i{display:block;height:100%;transition:width .4s ease;min-width:0}
+.s-t{background:var(--up)}
+.s-n{background:var(--down)}
+.split-key{display:flex;justify-content:space-between;gap:12px;font:600 12.5px/1.4 var(--font-mono);font-variant-numeric:tabular-nums}
+.votes{margin:0;font-size:14px;color:var(--soft);max-width:none}
+.ranges{display:flex;flex-direction:column;gap:9px}
+.rrow,.raxis{display:grid;grid-template-columns:62px minmax(0,1fr) 38px;gap:10px;align-items:center}
+.rtrack{position:relative;height:14px;border-radius:3px;background:#0b1226;display:block}
+.rtrack .band{position:absolute;top:2px;bottom:2px;border-radius:2px}
+.band.n{background:rgba(69,184,255,.5)}
+.band.t{background:rgba(255,112,97,.5)}
+.rtrack .mark{position:absolute;top:-3px;bottom:-3px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--signal);box-shadow:0 0 0 2px var(--ink-3);transition:left .4s ease}
+.rval{font:600 12.5px/1 var(--font-mono);text-align:right;font-variant-numeric:tabular-nums}
+.raxis{font:500 10.5px/1 var(--font-mono);color:var(--muted)}
+.raxis .ticks{display:flex;justify-content:space-between}
+.legend2{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--muted)}
+.legend2 li{display:flex;align-items:center;gap:7px}
+.legend2 .band{width:16px;height:8px;border-radius:2px;display:inline-block}
+.legend2 .mark{width:3px;height:14px;border-radius:2px;background:var(--signal);display:inline-block}
+
+/* Màn hình 1: nhập dữ liệu */
+.howto{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px 36px;counter-reset:h}
+.howto li{counter-increment:h;display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:12px;font-size:15px;line-height:1.6;color:var(--soft)}
+.howto li::before{content:"Bước " counter(h);font:600 12px/1.4 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--signal)}
+.inputs{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start}
+.in-right{display:flex;flex-direction:column;gap:20px;min-width:0}
+.go{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center}
+#scr-in h1{font-size:clamp(28px,3.8vw,44px)}
+.go-txt{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 240px}
+.go-txt .note{margin:0}
+
+/* Màn hình 2: kết quả theo từng mục */
+.rhead{display:flex;flex-wrap:wrap;gap:14px 24px;justify-content:space-between;align-items:flex-end}
+.msec{display:flex;flex-direction:column;gap:22px;scroll-margin-top:66px;min-width:0}
+.msec+.msec{border-top:1px solid var(--line);padding-top:clamp(24px,3.4vw,40px)}
+.mhead{display:flex;flex-direction:column;gap:8px}
+.mnum{font:600 12px/1.4 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
+.msec h2{margin:0;font:700 clamp(23px,2.7vw,31px)/1.22 var(--font-display);letter-spacing:-.01em;text-wrap:balance}
+.mhead p,.mcol p{margin:0;max-width:66ch;color:var(--soft)}
+.msec>.note{margin:0;max-width:78ch}
+
+.gtable{width:100%;border-collapse:collapse}
+.gtable th,.gtable td{text-align:left;vertical-align:middle;padding:13px 18px 13px 0;border-top:1px solid var(--line);font-size:14.5px;line-height:1.45;color:var(--soft)}
+.gtable thead th{font:600 12px/1.4 var(--font-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-top:0;padding-top:0;padding-bottom:10px}
+.gtable tbody th{font:600 13.5px/1 var(--font-mono);color:var(--text)}
+.gtable .num{font:600 14px/1 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--text)}
+.gtable .trk{width:32%;min-width:170px}
+.gtable .mark{box-shadow:0 0 0 2px var(--ink);transition:none}
+.gtable td:last-child{padding-right:0}
+.pill{display:inline-flex;align-items:center;gap:7px;font:600 12.5px/1 var(--font-body);border:1px solid currentColor;border-radius:999px;padding:6px 10px;white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.t,.gchip.t{color:var(--up)}
+.pill.n,.gchip.n{color:var(--down)}
+.pill.m,.gchip.m{color:var(--muted)}
+
+
+.paths{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 44px}
+.paths li{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding:16px 0 18px 14px;box-shadow:inset 3px 0 0 var(--line)}
+.paths li.flag{box-shadow:inset 3px 0 0 var(--up)}
+.paths strong{font-weight:600;font-size:16.5px;line-height:1.4}
+.pdesc{font-size:14px;color:var(--muted);line-height:1.5}
+.pgenes{display:flex;flex-wrap:wrap;gap:6px}
+.gchip{font:600 12px/1 var(--font-mono);border:1px solid currentColor;border-radius:6px;padding:6px 8px}
+.pcall{font-size:14.5px;color:var(--soft)}
+
+/* Thanh ứng dụng và các trang */
+.appbar{position:sticky;top:0;z-index:20;background:var(--ink);border-bottom:1px solid var(--line)}
+.appbar-in{max-width:1240px;margin:0 auto;padding:0 var(--gut);display:flex;align-items:center;gap:8px 30px;min-height:54px}
+.brand{display:flex;align-items:center;gap:10px;font:700 17px/1 var(--font-display);color:var(--text);text-decoration:none;flex:none}
+.brand-mark{width:12px;height:12px;border-radius:50%;background:var(--signal);box-shadow:0 0 0 3px rgba(255,196,77,.18)}
+.tabs{display:flex;gap:2px;overflow-x:auto;min-width:0;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs a{flex:none;padding:19px 12px 16px;font:500 14.5px/1 var(--font-body);color:var(--muted);text-decoration:none;border-bottom:3px solid transparent}
+.tabs a:hover{color:var(--text)}
+.tabs a:focus-visible{outline-offset:-3px}
+.tabs a[aria-current="page"]{color:var(--text);border-bottom-color:var(--signal)}
+.pg{display:flex;flex-direction:column;gap:clamp(28px,4vw,44px)}
+.pg[hidden]{display:none}
+.pg>.mast{max-width:820px}
+.pg h1{font-size:clamp(28px,3.8vw,44px)}
+.sources{margin-top:clamp(40px,6vw,72px)}
+
+/* Biểu đồ: màu hai nhóm và màu bốn mô hình đã qua bộ kiểm tra bảng màu trên nền tối */
+.app-out.hi{--state:var(--hi)}
+.app-out.lo{--state:var(--lo)}
+.s-t{background:var(--hi)}
+.s-n{background:var(--lo)}
+.band.n{background:rgba(57,135,229,.55)}
+.band.t{background:rgba(230,103,103,.55)}
+.sq{width:10px;height:10px;border-radius:2px;display:inline-block;flex:none}
+.sq.t{background:var(--hi)}
+.sq.n{background:var(--lo)}
+.sq.mid{background:var(--mid)}
+.ringk{width:11px;height:11px;border-radius:50%;border:2px solid var(--signal);display:inline-block;flex:none}
+.key{flex:none;display:inline-block}
+.key.ln{width:16px;height:3px;border-radius:2px}
+.key.sq{width:9px;height:9px;border-radius:2px}
+.legend2 li .key{align-self:center}
+.split-key span{color:var(--text)}
+.split-key>span{display:flex;align-items:center;gap:7px}
+.pill,.pill.t,.pill.n,.pill.m{color:var(--text);border-color:var(--line)}
+.pill::before{background:var(--mid)}
+.pill.t{border-color:var(--hi)}
+.pill.t::before{background:var(--hi)}
+.pill.n{border-color:var(--lo)}
+.pill.n::before{background:var(--lo)}
+.gchip,.gchip.t,.gchip.n,.gchip.m{color:var(--text);border-color:var(--line)}
+.fig{margin:0;display:flex;flex-direction:column;gap:12px;min-width:0}
+.fig figcaption{font:600 15.5px/1.4 var(--font-body);color:var(--text)}
+.plot{position:relative;min-width:0}
+.plot svg{display:block;max-width:100%}
+.plot text{font-family:var(--font-body);fill:var(--muted)}
+.plot text.ax{font-size:11.5px;font-variant-numeric:tabular-nums}
+.plot text.lb{font-size:12px;font-weight:600;fill:var(--text);font-variant-numeric:tabular-nums}
+.plot text.gn{font:600 12px var(--font-mono);fill:var(--text)}
+.plot rect[tabindex]:focus{outline:none}
+.plot rect[tabindex]:focus-visible{stroke:var(--signal);stroke-width:1.5}
+.tip{position:absolute;z-index:3;pointer-events:none;background:#0b1226;border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12.5px;line-height:1.5;min-width:150px;max-width:280px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.tip[hidden]{display:none}
+.tip-h{font-weight:600;color:var(--text);margin-bottom:3px}
+.tip-r{display:flex;align-items:center;gap:8px;color:var(--muted)}
+.tip-r b{color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+.shap{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:28px 48px;align-items:start}
+.mcol{display:flex;flex-direction:column;gap:14px;min-width:0}
+.mcol h3{margin:0;font:600 17px/1.35 var(--font-body)}
+.shap-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px;font-size:14.5px;line-height:1.55;color:var(--soft)}
+.shap-list li{display:grid;grid-template-columns:10px minmax(0,1fr);gap:10px;align-items:baseline}
+.shap-list b{color:var(--text);font:600 13px/1.4 var(--font-mono)}
+.next{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px 28px}
+.next li{display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--line);padding-top:12px;font-size:14px;line-height:1.5;color:var(--muted)}
+.next a{font-weight:600;font-size:16px;color:var(--text)}
+.tscroll{overflow-x:auto}
+.mtable,.risk,.ptable,.pmat{width:100%;border-collapse:collapse}
+.mtable th,.mtable td,.ptable th,.ptable td,.pmat th,.pmat td{text-align:left;padding:13px 18px 13px 0;border-top:1px solid var(--line);font-size:14.5px;line-height:1.5;vertical-align:top}
+.mtable thead th,.risk thead th,.ptable thead th,.pmat thead th{font:600 12px/1.4 var(--font-mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);border-top:0;vertical-align:bottom}
+.mtable .num,.risk .num{text-align:right}
+.mtable td.num{font:500 14.5px/1.5 var(--font-mono);font-variant-numeric:tabular-nums;color:var(--soft);white-space:nowrap}
+.mtable td.best{font-weight:600;color:var(--text);text-decoration:underline;text-decoration-color:var(--signal);text-decoration-thickness:2px;text-underline-offset:5px}
+.mtable td small{font:500 12px/1.5 var(--font-mono);color:var(--muted);text-decoration:none;display:inline-block;margin-left:8px}
+.mtable tbody th{font-weight:600;white-space:nowrap}
+.mtable tbody th .key,.risk tbody th .key{margin-right:10px;vertical-align:middle}
+.mtable td:last-child,.mtable th:last-child{padding-right:0}
+.tag{font:500 11.5px/1 var(--font-body);font-style:normal;color:var(--text);border:1px solid var(--signal);border-radius:999px;padding:4px 8px;margin-left:10px;white-space:nowrap}
+.rocs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 40px}
+.two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 48px}
+.plain{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;color:var(--soft);font-size:15px;line-height:1.6}
+.filters{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:center;font-size:14.5px;color:var(--soft)}
+.filters select{font:600 14px/1 var(--font-mono);color:var(--text);background:var(--ink-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.tiles{margin:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.tiles div{border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;background:var(--ink-2);min-width:0}
+.tiles dt{font-size:13px;color:var(--muted);line-height:1.35}
+.tiles dd{margin:0;font:700 24px/1.2 var(--font-display);color:var(--text)}
+.risk th,.risk td{padding:8px 12px 8px 0;font-size:13px;border-top:1px solid var(--line);text-align:left}
+.risk td.num,.risk th.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.risk tbody th{font-weight:500;white-space:nowrap}
+.read{margin:0;max-width:72ch;font-size:16.5px;color:var(--text)}
+.pg>.note{margin:0;max-width:78ch}
+.ptable td{color:var(--soft)}
+.ptable tbody th{font:600 13.5px/1.5 var(--font-mono);white-space:nowrap}
+.ptable .gfull{display:block;font:500 12.5px/1.45 var(--font-body);color:var(--muted);white-space:normal;max-width:22ch}
+.ptable .muted{color:var(--muted)}
+.ptable td:nth-child(2){min-width:240px}
+.nowrap{white-space:nowrap}
+.pmat th{font-weight:500}
+.pmat .gcol{text-align:center;padding-right:0;padding-left:6px;width:62px;font:600 11.5px/1.5 var(--font-mono);vertical-align:middle}
+.pmat tbody th{min-width:230px}
+.pmat .tn{display:block;color:var(--text)}
+.pmat .tv{display:block;font:500 12px/1.5 var(--font-mono);color:var(--muted)}
+.pmat tr.grp th{font:600 12px/1.4 var(--font-mono);letter-spacing:.05em;text-transform:uppercase;color:var(--signal);padding:20px 0 8px;border-top:0}
+.dotm{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--signal)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.paths li{box-shadow:none;padding-left:0}
+.paths.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+
+@media (max-width:980px){
+  .stage{grid-template-columns:minmax(0,1fr)}
+  .inputs,.shap,.rocs,.two-col,.paths.three{grid-template-columns:minmax(0,1fr)}
+  .next,.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:720px){
+  .canvas-wrap{aspect-ratio:auto;height:400px}
+  .phases,.howto,.paths{grid-template-columns:minmax(0,1fr)}
+  .gtable,.gtable tbody{display:block}
+  .gtable thead{position:absolute;left:-9999px;top:auto}
+  .gtable tbody tr{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px 14px;align-items:center;padding:15px 0;border-top:1px solid var(--line)}
+  .gtable th,.gtable td{display:block;border:0;padding:0;width:auto}
+  .gtable tbody th{grid-area:1/1;font-size:15px}
+  .gtable td:last-child{grid-area:1/2;justify-self:end}
+  .gtable td.c-val{grid-area:2/1}
+  .gtable td.c-shap{grid-area:4/1/5/3;text-align:left}
+  .gtable td.c-shap::before{content:"SHAP ";font:500 12.5px/1 var(--font-body);color:var(--muted)}
+  .gtable td.c-shap::after{content:" điểm";font:500 12.5px/1 var(--font-body);color:var(--muted)}
+  .gtable td:nth-child(3){grid-area:2/2}
+  .gtable td.trk{grid-area:3/1/4/3;width:auto;min-width:0}
+  .appbar-in{gap:8px 14px}
+  .brand{font-size:15px}
+  .tabs a{padding:17px 9px 14px;font-size:14px}
+  .gtable td.c-val::before{content:"Giá trị ";font:500 12.5px/1 var(--font-body);color:var(--muted)}
+  .gtable td:nth-child(3)::after{content:" so với mô lành";color:var(--muted)}
+  .step-body{padding-left:16px}
+  .hint{left:92px;right:12px;bottom:10px;font-size:12px}
+}
+@media (max-width:460px){
+  .next{grid-template-columns:minmax(0,1fr)}
+  .grow{grid-template-columns:60px minmax(0,1fr) 68px;gap:8px}
+  .app-out{padding:16px 14px 16px 18px}
+  .spacer{display:none}
+}
+@media (prefers-reduced-motion:reduce){.track i,.split i,.rtrack .mark{transition:none}}
+</style>
+</head>
+<body>
+<header class="appbar">
+  <div class="appbar-in">
+    <a class="brand" href="#du-doan"><i class="brand-mark"></i>Biomarker ML</a>
+    <nav class="tabs" aria-label="Các trang của ứng dụng">
+      <a href="#du-doan" data-view="predict" aria-current="page">Dự đoán</a>
+      <a href="#mo-hinh" data-view="models">So sánh mô hình</a>
+      <a href="#song-con" data-view="survival">Tiên lượng sống</a>
+      <a href="#con-duong" data-view="pathway">Con đường sinh học</a>
+      <a href="#mo-phong" data-view="sim">Mô phỏng 3D</a>
+    </nav>
+  </div>
+</header>
+<main class="page">
+
+<section class="pg" id="v-predict">
+  <div class="screen" id="scr-in">
+    <header class="mast">
+      <p class="eyebrow">Dự đoán từ 6 gen biomarker</p>
+      <h1 id="h-in" tabindex="-1">Nhập dữ liệu của mẫu cần dự đoán</h1>
+    </header>
+
+    <ol class="howto" aria-label="Hướng dẫn nhập dữ liệu">
+      <li>Chuẩn bị mức biểu hiện của sáu gen GUCA2A, MMP7, CLCA4, CA2, AQP8 và CDH3 của mẫu, tính theo log2(TPM + 1), từ 0 đến 15.</li>
+      <li>Tải lên một tệp nhỏ chứa sáu giá trị đó, hoặc nhập trực tiếp bằng thanh kéo và ô số.</li>
+      <li>Bấm Dự đoán để xem nhóm nguy cơ, xác suất và phần giải thích bằng SHAP.</li>
+    </ol>
+
+    <div class="inputs">
+      <div class="block">
+        <h2><span class="k">Hình thức 1</span>Tải lên một tệp nhỏ</h2>
+        <p class="note">Tệp CSV hoặc Excel, tối đa 2 MB. Mỗi hàng là một gen, cột bên cạnh là giá trị biểu hiện của mẫu. Đọc xong, sáu giá trị sẽ hiện ở phần nhập trực tiếp để bạn kiểm tra.</p>
+        <label class="drop" id="drop" for="file">
+          <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx,.xls">
+          <span class="drop-main">Chọn tệp CSV hoặc Excel</span>
+          <span class="drop-sub">hoặc kéo thả tệp vào đây, tối đa 2 MB</span>
+        </label>
+        <label class="check" for="rawTpm"><input type="checkbox" id="rawTpm">Tệp chứa TPM thô, trang tự đổi sang log2(TPM + 1)</label>
+        <p class="status" id="fileMsg" role="status"></p>
+        <div class="sample">
+          <div class="sample-head">
+            <span>Tệp mẫu: mau_benh_nhan.csv</span>
+            <span class="sample-btns">
+              <button type="button" class="btn sm" id="trySample">Thử với tệp mẫu</button>
+              <button type="button" class="btn sm" id="dlSample" hidden>Tải tệp mẫu</button>
+              <button type="button" class="btn sm" id="copySample">Chép nội dung</button>
+            </span>
+          </div>
+<pre id="sampleCsv">gene,expression
+GUCA2A,8.8
+MMP7,2.4
+CLCA4,7.9
+CA2,9.4
+AQP8,6.5
+CDH3,2.7</pre>
+        </div>
+      </div>
+
+      <div class="in-right">
+      <div class="block">
+        <h2><span class="k">Hình thức 2</span>Nhập trực tiếp</h2>
+        <p class="note">Kéo thanh hoặc gõ số cho từng gen. Đơn vị là log2(TPM + 1), từ 0 đến 15. Các số có sẵn là ví dụ, hãy thay bằng số của bạn.</p>
+        <form id="pform" novalidate>
+          <div class="grows">
+            <div class="grow">
+              <label class="gname" for="in-GUCA2A">GUCA2A</label>
+              <input type="range" id="rg-GUCA2A" min="0" max="15" step="0.1" value="4.1" aria-label="GUCA2A, thanh kéo">
+              <input type="number" id="in-GUCA2A" min="0" max="15" step="any" value="4.1" inputmode="decimal">
+            </div>
+            <div class="grow">
+              <label class="gname" for="in-MMP7">MMP7</label>
+              <input type="range" id="rg-MMP7" min="0" max="15" step="0.1" value="6" aria-label="MMP7, thanh kéo">
+              <input type="number" id="in-MMP7" min="0" max="15" step="any" value="6" inputmode="decimal">
+            </div>
+            <div class="grow">
+              <label class="gname" for="in-CLCA4">CLCA4</label>
+              <input type="range" id="rg-CLCA4" min="0" max="15" step="0.1" value="3.2" aria-label="CLCA4, thanh kéo">
+              <input type="number" id="in-CLCA4" min="0" max="15" step="any" value="3.2" inputmode="decimal">
+            </div>
+            <div class="grow">
+              <label class="gname" for="in-CA2">CA2</label>
+              <input type="range" id="rg-CA2" min="0" max="15" step="0.1" value="5.9" aria-label="CA2, thanh kéo">
+              <input type="number" id="in-CA2" min="0" max="15" step="any" value="5.9" inputmode="decimal">
+            </div>
+            <div class="grow">
+              <label class="gname" for="in-AQP8">AQP8</label>
+              <input type="range" id="rg-AQP8" min="0" max="15" step="0.1" value="2.4" aria-label="AQP8, thanh kéo">
+              <input type="number" id="in-AQP8" min="0" max="15" step="any" value="2.4" inputmode="decimal">
+            </div>
+            <div class="grow">
+              <label class="gname" for="in-CDH3">CDH3</label>
+              <input type="range" id="rg-CDH3" min="0" max="15" step="0.1" value="5.6" aria-label="CDH3, thanh kéo">
+              <input type="number" id="in-CDH3" min="0" max="15" step="any" value="5.6" inputmode="decimal">
+            </div>
+          </div>
+          <div class="presets">
+            <span>Điền nhanh</span>
+            <button type="button" data-preset="normal">Giống mô lành</button>
+            <button type="button" data-preset="tumor">Giống mô ung thư</button>
+            <button type="button" data-preset="hard">Khó phân loại</button>
+          </div>
+        </form>
+      </div>
+      <div class="go">
+        <button type="submit" form="pform" class="btn primary" id="btnPredict">Dự đoán</button>
+        <div class="go-txt">
+          <p class="status" id="formMsg" role="status"></p>
+          <p class="note" id="srcNote">Dữ liệu sẽ dự đoán: mẫu ví dụ có sẵn.</p>
+        </div>
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="scr-out" hidden>
+    <div class="rhead">
+      <header class="mast">
+        <p class="eyebrow">Kết quả</p>
+        <h1 id="h-out" tabindex="-1">Kết quả dự đoán</h1>
+        <p class="lede" id="resSrc">Nguồn dữ liệu: mẫu ví dụ có sẵn.</p>
+      </header>
+      <button type="button" class="btn" id="btnBack">Nhập mẫu khác</button>
+    </div>
+
+    <section class="msec" id="r1">
+      <div class="mhead"><span class="mnum">Mục 1</span><h2>Kết luận</h2></div>
+      <div class="app-out" id="result" aria-live="polite">
+        <p class="verdict"><b id="vMain"></b></p>
+        <div class="prob">
+          <span class="prob-num" id="pNum"></span>
+          <span class="prob-cap">xác suất mẫu thuộc nhóm nguy cơ cao, theo mô hình Random Forest</span>
+        </div>
+        <div class="split" id="split" role="img" aria-label="Tỉ lệ xác suất giữa hai nhóm"><i class="s-t" id="splitT"></i><i class="s-n" id="splitN"></i></div>
+        <div class="split-key"><span><i class="sq t"></i><span id="keyT"></span></span><span><i class="sq n"></i><span id="keyN"></span></span></div>
+        <p class="votes" id="why"></p>
+        <p class="note" id="modelNote"></p>
+      </div>
+    </section>
+
+    <section class="msec" id="r2">
+      <div class="mhead"><span class="mnum">Mục 2</span><h2>Vì sao mô hình kết luận như vậy</h2><p id="shapLead"></p></div>
+      <div class="shap">
+        <figure class="fig">
+          <figcaption>Biểu đồ thác SHAP của mẫu này</figcaption>
+          <div class="plot" id="shapFall"></div>
+          <ul class="legend2"><li><i class="sq t"></i>Đẩy về nguy cơ cao</li><li><i class="sq n"></i>Kéo về lành tính</li></ul>
+        </figure>
+        <div class="mcol">
+          <h3>Đọc biểu đồ bằng lời</h3>
+          <ul class="shap-list" id="shapText"></ul>
+        </div>
+      </div>
+      <figure class="fig">
+        <figcaption>Biểu đồ tổng hợp SHAP trên 100 mẫu kiểm tra</figcaption>
+        <div class="plot" id="shapSwarm"></div>
+        <ul class="legend2"><li><i class="sq n"></i>Giá trị gen thấp</li><li><i class="sq mid"></i>Trung bình</li><li><i class="sq t"></i>Giá trị gen cao</li><li><i class="ringk"></i>Mẫu vừa nhập</li></ul>
+      </figure>
+      <p class="note">Mỗi chấm ở biểu đồ tổng hợp là một mẫu kiểm tra: bên trái vạch 0 là kéo về lành tính, bên phải là đẩy về nguy cơ cao. Giá trị SHAP ở đây là giá trị Shapley chính xác: với 6 gen, trang xét đủ 64 tổ hợp gen trên 100 mẫu nền, không xấp xỉ và không dùng thư viện shap của Python. Mức nền cộng sáu giá trị SHAP luôn bằng đúng xác suất của mô hình.</p>
+    </section>
+
+    <section class="msec" id="r3">
+      <div class="mhead"><span class="mnum">Mục 3</span><h2>Kết quả từng gen</h2><p id="geneSum"></p></div>
+      <table class="gtable">
+        <thead><tr><th scope="col">Gen</th><th scope="col">Giá trị</th><th scope="col">So với mô lành</th><th scope="col">Vị trí trên thang 0 đến 15</th><th scope="col">SHAP (điểm)</th><th scope="col">Nhận định</th></tr></thead>
+        <tbody id="gbody"></tbody>
+      </table>
+      <ul class="legend2">
+        <li><i class="band n"></i>Thường gặp ở mô lành</li>
+        <li><i class="band t"></i>Thường gặp ở mô ung thư</li>
+        <li><i class="mark"></i>Mẫu đang xét</li>
+      </ul>
+    </section>
+
+    <section class="msec" id="r4">
+      <div class="mhead"><span class="mnum">Mục 4</span><h2>Xem tiếp</h2></div>
+      <ul class="next">
+        <li><a href="#mo-hinh">So sánh bốn mô hình</a>Random Forest đặt cạnh XGBoost, SVM và hồi quy logistic.</li>
+        <li><a href="#song-con">Tiên lượng sống</a>Đường cong Kaplan-Meier theo mức biểu hiện từng gen.</li>
+        <li><a href="#con-duong">Con đường sinh học</a>Chức năng của sáu gen theo KEGG và Gene Ontology.</li>
+        <li><a href="#mo-phong">Mô phỏng 3D</a>Quy trình đã tạo ra mô hình, xoay được 360°.</li>
+      </ul>
+    </section>
+  </div>
+</section>
+
+<section class="pg" id="v-models" hidden>
+  <header class="mast">
+    <p class="eyebrow">So sánh đa mô hình</p>
+    <h1>Bốn mô hình trên cùng một bộ dữ liệu</h1>
+    <p class="lede" id="mdata"></p>
+  </header>
+  <div class="msec">
+    <div class="mhead"><h2>Bảng chỉ số hiệu suất</h2></div>
+    <div class="tscroll">
+      <table class="mtable">
+        <thead><tr><th scope="col">Mô hình</th><th scope="col" class="num">Accuracy</th><th scope="col" class="num">Precision</th><th scope="col" class="num">Recall</th><th scope="col" class="num">F1-Score</th><th scope="col" class="num">AUC-ROC (khoảng tin cậy 95%)</th></tr></thead>
+        <tbody id="mbody"></tbody>
+      </table>
+    </div>
+    <p class="note">Số gạch dưới là giá trị cao nhất của mỗi cột. Ngưỡng phân loại là xác suất từ 0,5 trở lên; với SVM là điểm quyết định từ 0 trở lên. Khoảng tin cậy của AUC tính bằng bootstrap 300 lần trên tập kiểm tra.<br>* XGBoost ở đây là thuật toán tăng cường gradient theo công thức của XGBoost, viết lại bằng JavaScript để chạy trong trình duyệt; đây không phải thư viện xgboost. † SVM dùng nhân tuyến tính.</p>
+  </div>
+  <div class="msec">
+    <div class="mhead"><h2>Đường cong ROC</h2><p>Đường cong càng ôm sát góc trên bên trái thì mô hình càng tốt. Hình bên phải phóng to đúng góc đó để thấy khác biệt giữa các mô hình.</p></div>
+    <div class="rocs">
+      <figure class="fig"><figcaption>Toàn bộ đường cong</figcaption><div class="plot" id="rocFull"></div></figure>
+      <figure class="fig"><figcaption>Phóng to góc trên bên trái</figcaption><div class="plot" id="rocZoom"></div></figure>
+    </div>
+    <ul class="legend2" id="rocLegend"></ul>
+  </div>
+  <div class="msec">
+    <div class="mhead"><h2>Kết luận từ số liệu</h2><p id="mverdict"></p></div>
+    <div class="two-col">
+      <div class="mcol">
+        <h3>Lý do ứng dụng dùng Random Forest để dự đoán</h3>
+        <ul class="plain">
+          <li>Không cần chuẩn hóa dữ liệu trước, nên ít bước xử lý và ít chỗ sai.</li>
+          <li>Bắt được quan hệ phi tuyến và tương tác giữa các gen.</li>
+          <li>Giải thích được từng dự đoán bằng SHAP, như ở trang Dự đoán.</li>
+        </ul>
+      </div>
+      <div class="mcol">
+        <h3>Điều cần nói rõ khi trình bày</h3>
+        <ul class="plain">
+          <li>Trang không cố định trước mô hình nào thắng. Bảng và biểu đồ được tính lại từ dữ liệu mỗi lần mở trang.</li>
+          <li>Dữ liệu hiện là mô phỏng. Mô hình nào tối ưu phải kết luận trên dữ liệu GEO hoặc TCGA thật.</li>
+          <li>Khi các khoảng tin cậy chồng lên nhau, hãy nói các mô hình tương đương, đừng nói một mô hình vượt trội.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="pg" id="v-survival" hidden>
+  <header class="mast">
+    <p class="eyebrow">Phân tích tiên lượng sống</p>
+    <h1>Sống còn theo mức biểu hiện gen</h1>
+    <p class="lede">Đường cong Kaplan-Meier so sánh hai nhóm bệnh nhân ung thư: nhóm có gen biểu hiện cao hơn trung vị, và nhóm bằng hoặc thấp hơn trung vị.</p>
+  </header>
+  <div class="filters"><label for="kmGene">Chia nhóm theo gen</label><select id="kmGene"><option value="0">GUCA2A</option><option value="1">MMP7</option><option value="2">CLCA4</option><option value="3">CA2</option><option value="4">AQP8</option><option value="5">CDH3</option></select></div>
+  <dl class="tiles">
+    <div><dt>p của kiểm định log-rank</dt><dd id="kmP"></dd></div>
+    <div><dt>Trung vị sống còn, nhóm cao</dt><dd id="kmMedHi"></dd></div>
+    <div><dt>Trung vị sống còn, nhóm thấp</dt><dd id="kmMedLo"></dd></div>
+    <div><dt>Bệnh nhân / biến cố tử vong</dt><dd id="kmN"></dd></div>
+  </dl>
+  <figure class="fig">
+    <figcaption>Đường cong sống còn Kaplan-Meier</figcaption>
+    <div class="plot" id="kmFig"></div>
+    <ul class="legend2" id="kmLegend"></ul>
+    <div class="tscroll"><table class="risk" id="kmRisk"></table></div>
+  </figure>
+  <p class="read" id="kmRead"></p>
+  <p class="note" id="kmSample"></p>
+  <p class="note">"Chưa đạt" nghĩa là hơn một nửa nhóm vẫn còn sống khi hết thời gian theo dõi. Dữ liệu sống còn ở đây là mô phỏng: 240 bệnh nhân, thời gian sống và thời điểm ngừng theo dõi được sinh ngẫu nhiên. Mô phỏng giả định MMP7 và CDH3 cao, GUCA2A, CLCA4 và CA2 thấp thì nguy cơ tử vong cao hơn; AQP8 không có tác động trực tiếp. Kết quả thật phải lấy từ dữ liệu lâm sàng, ví dụ TCGA.</p>
+</section>
+
+<section class="pg" id="v-pathway" hidden>
+  <header class="mast">
+    <p class="eyebrow">Cơ chế phân tử</p>
+    <h1>Sáu gen biomarker làm gì trong tế bào</h1>
+    <p class="lede">Mô hình chỉ thấy con số. Trang này cho biết mỗi con số ứng với chức năng sinh học nào, theo KEGG và Gene Ontology.</p>
+  </header>
+  <div class="msec">
+    <div class="mhead"><h2>Chức năng của từng gen</h2><p id="pSample"></p></div>
+    <div class="tscroll">
+      <table class="ptable" id="pgenes">
+        <thead><tr><th scope="col">Gen</th><th scope="col">Chức năng</th><th scope="col">Ở ung thư đại trực tràng</th><th scope="col">Ở mẫu vừa nhập</th></tr></thead>
+        <tbody>
+            <tr><th scope="row">GUCA2A<span class="gfull">Guanylate cyclase activator 2A (guanylin)</span></th><td>Peptide do tế bào biểu mô ruột tiết ra. Nó kích hoạt thụ thể guanylate cyclase C, làm tăng cGMP trong tế bào.</td><td class="nowrap">↓ Giảm</td><td data-gene="GUCA2A" class="muted">Chưa có mẫu</td></tr>
+            <tr><th scope="row">MMP7<span class="gfull">Matrix metallopeptidase 7 (matrilysin)</span></th><td>Enzyme phân giải chất nền ngoại bào. Biểu hiện của nó do con đường Wnt/β-catenin điều khiển.</td><td class="nowrap">↑ Tăng</td><td data-gene="MMP7" class="muted">Chưa có mẫu</td></tr>
+            <tr><th scope="row">CLCA4<span class="gfull">Chloride channel accessory 4</span></th><td>Protein thuộc họ điều hòa kênh clorua nhạy canxi, có thể tham gia dẫn ion clorua qua màng. Trong ung thư đại trực tràng, nó được báo cáo là kìm hãm xâm lấn và di căn.</td><td class="nowrap">↓ Giảm</td><td data-gene="CLCA4" class="muted">Chưa có mẫu</td></tr>
+            <tr><th scope="row">CA2<span class="gfull">Carbonic anhydrase 2</span></th><td>Enzyme xúc tác phản ứng giữa CO2 và nước tạo H+ và bicarbonat, giúp giữ cân bằng pH.</td><td class="nowrap">↓ Giảm</td><td data-gene="CA2" class="muted">Chưa có mẫu</td></tr>
+            <tr><th scope="row">AQP8<span class="gfull">Aquaporin 8</span></th><td>Kênh trên màng cho nước, hydrogen peroxide và amoniac đi qua. Gen này biểu hiện chủ yếu ở tụy và đại tràng.</td><td class="nowrap">↓ Giảm</td><td data-gene="AQP8" class="muted">Chưa có mẫu</td></tr>
+            <tr><th scope="row">CDH3<span class="gfull">Cadherin 3 (P-cadherin)</span></th><td>Phân tử kết dính tế bào phụ thuộc canxi, gắn các tế bào cùng loại với nhau.</td><td class="nowrap">↑ Tăng</td><td data-gene="CDH3" class="muted">Chưa có mẫu</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="msec">
+    <div class="mhead"><h2>Gen nào thuộc con đường nào</h2><p>Mỗi chấm là một chú giải có trong KEGG hoặc Gene Ontology.</p></div>
+    <div class="tscroll"><table class="pmat" id="pmat"></table></div>
+    <p class="note">Bảng này liệt kê chú giải của sáu gen, chưa phải phân tích làm giàu (enrichment). Phân tích làm giàu cần toàn bộ danh sách gen sai khác và một công cụ như clusterProfiler hoặc Enrichr để tính p-value cho từng con đường. Chú giải KEGG của GUCA2A và AQP8 chưa được đối chiếu, nên bảng chỉ ghi phần Gene Ontology của hai gen này.</p>
+  </div>
+  <div class="msec">
+    <div class="mhead"><h2>Ba nhóm chức năng</h2></div>
+    <ul class="paths three">
+      <li><strong>Phân giải chất nền và tín hiệu Wnt</strong><span class="pgenes"><span class="gchip">MMP7 ↑</span></span><span class="pcall">MMP7 cắt chất nền ngoại bào và chịu sự điều khiển của con đường Wnt/β-catenin. Nó tăng mạnh ở mô ung thư đại trực tràng.</span></li>
+      <li><strong>Vận chuyển ion, nước và cân bằng pH</strong><span class="pgenes"><span class="gchip">GUCA2A ↓</span><span class="gchip">CLCA4 ↓</span><span class="gchip">CA2 ↓</span><span class="gchip">AQP8 ↓</span></span><span class="pcall">Bốn gen này lo việc tiết dịch, dẫn clorua, dẫn nước và giữ pH của biểu mô ruột. Cả bốn đều giảm ở mô ung thư đại trực tràng so với mô lành.</span></li>
+      <li><strong>Kết dính tế bào</strong><span class="pgenes"><span class="gchip">CDH3 ↑</span></span><span class="pcall">P-cadherin gắn các tế bào với nhau. Gen này tăng ở mô ung thư đại trực tràng.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="pg" id="v-sim" hidden>
+  <header class="mast">
+    <p class="eyebrow">Quy trình tạo ra mô hình</p>
+    <h1>Mô phỏng 3D 360°</h1>
+    <p class="lede">Chuỗi xoắn ở giữa phát mRNA theo mức MMP7 và GUCA2A. Năm trạm xung quanh là năm bước phân tích RNA-Seq đã tạo ra bộ gen biomarker.</p>
+  </header>
+  <ol class="phases">
+    <li>
+      <span class="ph-tag">Giai đoạn 1 · Offline</span>
+      <strong>Nghiên cứu trên máy cá nhân hoặc Google Colab</strong>
+      Xử lý dữ liệu lớn từ GEO hoặc TCGA, lọc ra 5 đến 10 gen quan trọng nhất làm biomarker, rồi huấn luyện mô hình. Đó là năm trạm trong mô phỏng dưới đây.
+    </li>
+    <li class="now">
+      <span class="ph-tag">Giai đoạn 2 · Online</span>
+      <strong>Đóng gói mô hình thành trang web</strong>
+      Đầu vào chỉ còn là giá trị biểu hiện của đúng các gen đó cho một mẫu mới. Trang không nhận tệp dữ liệu thô khổng lồ, vì như vậy sẽ rất chậm hoặc sập.
+    </li>
+  </ol>
+  <div class="stage" role="group" aria-label="Mô phỏng 3D quy trình RNA-Seq">
+    <div class="view">
+      <div class="canvas-wrap">
+        <canvas id="scene" tabindex="0" role="img" aria-label="Cảnh 3D xoay 360 độ. Chuỗi xoắn DNA ở giữa, năm trạm của quy trình RNA-Seq xếp thành vòng tròn xung quanh. Dùng phím mũi tên để xoay, phím cộng trừ để phóng to thu nhỏ, phím số 0 đến 5 để chọn bước."></canvas>
+        <ul class="legend">
+          <li><i class="dot up"></i>Tăng biểu hiện</li>
+          <li><i class="dot down"></i>Giảm biểu hiện</li>
+          <li><i class="dot signal"></i>Biomarker được chọn</li>
+        </ul>
+        <p class="hint"><span class="mouse">Kéo để xoay 360° · Ctrl + cuộn để phóng to · Bấm vào một trạm để lại gần</span><span class="touch">Vuốt ngang để xoay 360° · Chạm vào một trạm để lại gần</span></p>
+      </div>
+      <div class="toolbar">
+        <button type="button" class="btn primary" id="btnTour">Chạy cả quy trình</button>
+        <button type="button" class="btn" id="btnSpin" aria-pressed="true">Tự xoay</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn sq" id="btnOut" aria-label="Thu nhỏ">−</button>
+        <button type="button" class="btn sq" id="btnIn" aria-label="Phóng to">+</button>
+        <button type="button" class="btn" id="btnHome">Toàn cảnh</button>
+      </div>
+    </div>
+
+    <ol class="steps" id="steps">
+      <li class="step is-on">
+        <button type="button" class="step-head" aria-expanded="true" aria-controls="b0">
+          <span class="step-num">Nền</span>
+          <span class="step-title">Tế bào: gen nào đang hoạt động?</span>
+          <span class="step-sum">DNA thì cố định, còn lượng mRNA thay đổi theo hoạt động của gen.</span>
+        </button>
+        <div class="step-body" id="b0">
+          <p>RNA-Seq đếm các phân tử mRNA, tức bản sao phiên mã từ DNA dùng để tổng hợp protein. Gen hoạt động càng mạnh thì càng sinh nhiều mRNA. Đặt mô bệnh cạnh mô khỏe sẽ lộ ra gen nào bật hoặc tắt bất thường.</p>
+          <div class="seg" role="group" aria-label="Loại mô">
+            <button type="button" class="seg-btn is-on" id="condH" aria-pressed="true">Mô khỏe</button>
+            <button type="button" class="seg-btn" id="condD" aria-pressed="false">Mô bệnh</button>
+            <button type="button" class="seg-btn" id="condU" aria-pressed="false">Mẫu vừa nhập</button>
+          </div>
+          <dl class="bars">
+            <div class="bar"><dt>MMP7</dt><dd><span class="track"><i id="bar0" style="background:var(--up)"></i></span><b id="val0">12</b></dd></div>
+            <div class="bar"><dt>ACTB</dt><dd><span class="track"><i id="bar1" style="background:var(--text)"></i></span><b id="val1">50</b></dd></div>
+            <div class="bar"><dt>GUCA2A</dt><dd><span class="track"><i id="bar2" style="background:var(--down)"></i></span><b id="val2">100</b></dd></div>
+          </dl>
+          <p class="note">Thanh ngang là lượng mRNA tương đối trong mô phỏng. Với "Mẫu vừa nhập", MMP7 và GUCA2A lấy theo số bạn đã nhập. Ở ung thư đại trực tràng, MMP7 thường tăng và GUCA2A thường giảm so với mô lành. ACTB là gen giữ nhà nên gần như không đổi.</p>
+        </div>
+      </li>
+
+      <li class="step">
+        <button type="button" class="step-head" aria-expanded="false" aria-controls="b1">
+          <span class="step-num">01</span>
+          <span class="step-title">Khai thác dữ liệu công khai</span>
+          <span class="step-sum">Tải bộ dữ liệu mô bệnh và mô lành từ GEO hoặc TCGA.</span>
+        </button>
+        <div class="step-body" id="b1" hidden>
+          <p>Bạn không cần phòng thí nghiệm ướt. Dữ liệu giải trình tự đã được các nhà khoa học công bố miễn phí trên hai ngân hàng lớn: GEO (Gene Expression Omnibus) và TCGA (The Cancer Genome Atlas).</p>
+          <p>Việc cần làm là tìm một bộ dữ liệu so sánh mô bệnh, ví dụ mô ung thư đại tràng, với mô bình thường của người khỏe mạnh.</p>
+          <ul class="chips"><li>GEO</li><li>TCGA</li></ul>
+        </div>
+      </li>
+
+      <li class="step">
+        <button type="button" class="step-head" aria-expanded="false" aria-controls="b2">
+          <span class="step-num">02</span>
+          <span class="step-title">Xử lý tin sinh học</span>
+          <span class="step-sum">Kiểm tra chất lượng, gióng hàng, rồi đếm thành ma trận biểu hiện.</span>
+        </button>
+        <div class="step-body" id="b2" hidden>
+          <p>Dữ liệu thô tải về là hàng triệu đoạn đọc ngắn (raw reads). Chúng đi qua ba chặng:</p>
+          <ol>
+            <li>Kiểm tra chất lượng bằng FastQC, loại các đoạn đọc kém.</li>
+            <li>Gióng hàng vào hệ gen người chuẩn bằng HISAT2 hoặc STAR.</li>
+            <li>Đếm số đoạn đọc của từng gen để tạo ma trận biểu hiện: mỗi hàng là một gen, mỗi cột là một mẫu bệnh hoặc mẫu khỏe.</li>
+          </ol>
+          <ul class="chips"><li>FastQC</li><li>HISAT2</li><li>STAR</li></ul>
+        </div>
+      </li>
+
+      <li class="step">
+        <button type="button" class="step-head" aria-expanded="false" aria-controls="b3">
+          <span class="step-num">03</span>
+          <span class="step-title">Phân tích biểu hiện sai khác</span>
+          <span class="step-sum">Lọc ra các gen chênh lệch rõ giữa nhóm bệnh và nhóm khỏe.</span>
+        </button>
+        <div class="step-body" id="b3" hidden>
+          <p>Gói DESeq2 hoặc edgeR trong R so sánh hàng chục nghìn gen và chỉ ra gen nào tăng hoặc giảm rõ rệt ở người bệnh. Kết quả thường được vẽ thành biểu đồ núi lửa (volcano plot) hoặc bản đồ nhiệt (heatmap).</p>
+          <div class="ctl">
+            <label for="fc">Ngưỡng |log2FC| <output id="fcOut" for="fc">1,0</output></label>
+            <input type="range" id="fc" min="0.5" max="3" step="0.1" value="1">
+          </div>
+          <div class="ctl">
+            <label for="pv">Ngưỡng p hiệu chỉnh <output id="pvOut" for="pv">0,05</output></label>
+            <input type="range" id="pv" min="0" max="3" step="1" value="1">
+          </div>
+          <dl class="counts">
+            <div class="c-up"><dt>Gen tăng</dt><dd id="nUp">0</dd></div>
+            <div class="c-down"><dt>Gen giảm</dt><dd id="nDown">0</dd></div>
+            <div><dt>Không đáng kể</dt><dd id="nNs">0</dd></div>
+          </dl>
+          <p class="note">|log2FC| = 1 nghĩa là tăng gấp đôi hoặc giảm một nửa. Trong cảnh 3D: trục ngang là log2FC, trục đứng là −log10(p hiệu chỉnh), trục sâu là mức biểu hiện trung bình.</p>
+          <ul class="chips"><li>DESeq2</li><li>edgeR</li></ul>
+        </div>
+      </li>
+
+      <li class="step">
+        <button type="button" class="step-head" aria-expanded="false" aria-controls="b4">
+          <span class="step-num">04</span>
+          <span class="step-title">Sàng lọc biomarker bằng học máy</span>
+          <span class="step-sum">Cô đọng hàng trăm gen thành bộ gen chữ ký 3 đến 10 gen.</span>
+        </button>
+        <div class="step-body" id="b4" hidden>
+          <p>Từ danh sách gen sai khác, các thuật toán như Random Forest, SVM hoặc LASSO chọn ra nhóm gen nhỏ nhất mà vẫn phân loại bệnh chính xác nhất. Nhóm đó gọi là bộ gen chữ ký (gene signature).</p>
+          <div class="ctl">
+            <label for="k">Số gen trong bộ chữ ký <output id="kOut" for="k">5</output></label>
+            <input type="range" id="k" min="1" max="10" step="1" value="5">
+          </div>
+          <div class="roc">
+            <canvas id="roc" role="img" aria-label="Đường cong ROC của bộ gen chữ ký trên dữ liệu mô phỏng"></canvas>
+            <div class="roc-read">
+              <span class="big" id="auc">0,00</span>
+              <span class="cap">AUC trên dữ liệu mô phỏng có nhiễu</span>
+              <span class="mono" id="sigList"></span>
+            </div>
+          </div>
+          <p class="note">AUC tăng nhanh với vài gen đầu rồi chững lại. Thêm gen yếu còn có thể làm AUC giảm vì kéo theo nhiễu. Vì vậy một bộ chữ ký tốt thường chỉ cần vài gen. Sáu gen đứng đầu chính là sáu ô nhập ở màn hình đầu.</p>
+          <ul class="chips"><li>Random Forest</li><li>SVM</li><li>LASSO</li></ul>
+        </div>
+      </li>
+
+      <li class="step">
+        <button type="button" class="step-head" aria-expanded="false" aria-controls="b5">
+          <span class="step-num">05</span>
+          <span class="step-title">Phân tích chức năng sinh học</span>
+          <span class="step-sum">Xem các gen được chọn tham gia quá trình nào của tế bào.</span>
+        </button>
+        <div class="step-body" id="b5" hidden>
+          <p>Phân tích làm giàu con đường (pathway enrichment) kiểm tra xem các gen biomarker thuộc con đường chuyển hóa hoặc quá trình tế bào nào, ví dụ phân chia tế bào quá mức hay chết tế bào theo chương trình (apoptosis).</p>
+          <p>Bước này cho các biomarker một lời giải thích sinh học, bên cạnh con số thống kê.</p>
+          <p class="note">Trong cảnh 3D, nút trắng là con đường sinh học, nút màu là gen. Đường nối cho biết gen thuộc con đường nào. Sơ đồ mang tính minh họa.</p>
+          <ul class="chips"><li>GO</li><li>KEGG</li></ul>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+  <footer class="sources">
+    <h2>Lưu ý và nguồn</h2>
+    <p>Mọi số liệu trong ứng dụng (dữ liệu huấn luyện và kiểm tra của bốn mô hình, dữ liệu sống còn, các điểm trong mô phỏng 3D) được sinh ngẫu nhiên để minh họa cách làm, không phải kết quả phân tích thật. Các phép tính trên dữ liệu đó thì là thật: chỉ số mô hình, giá trị SHAP, đường cong Kaplan-Meier và p-value đều được tính trong trình duyệt. Chiều tăng hoặc giảm của các gen ở ung thư đại trực tràng và chú giải KEGG, Gene Ontology lấy từ các nguồn dưới đây. Ứng dụng không dùng để chẩn đoán.</p>
+    <ul>
+      <li><a href="https://www.ncbi.nlm.nih.gov/geo/">GEO, Gene Expression Omnibus (NCBI)</a> và <a href="https://portal.gdc.cancer.gov/">TCGA trên GDC Data Portal</a></li>
+      <li><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC6701329">Phân tích gộp sáu bộ dữ liệu GEO về ung thư đại trực tràng (PMC6701329)</a></li>
+      <li><a href="https://www.frontiersin.org/articles/10.3389/fcell.2022.897568">Bộ ba gen CLCA1, CLCA4, GUCA2A trong ung thư đại trực tràng (Frontiers in Cell and Developmental Biology, 2022)</a></li>
+      <li>KEGG: <a href="https://www.kegg.jp/entry/K01397">MMP7</a>, <a href="https://www.kegg.jp/entry/hsa:760">CA2</a>, <a href="https://www.kegg.jp/entry/K06796">CDH3</a>. Atlas of Genetics and Cytogenetics in Oncology: <a href="https://atlasgeneticsoncology.org/gene/58262/">CLCA4</a></li>
+      <li>GeneCards: <a href="https://www.genecards.org/card/GUCA2A">GUCA2A</a>. Human Protein Atlas: <a href="https://www.proteinatlas.org/ENSG00000103375-AQP8/summary/gene">AQP8</a>, <a href="https://www.proteinatlas.org/ENSG00000062038-CDH3/summary/gene">CDH3</a>. Wikipedia: <a href="https://en.wikipedia.org/wiki/MMP7">MMP7</a></li>
+    </ul>
+  </footer>
+</main>
+
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" onerror="window.__xlsxFail=1"></script>
+<script>
+(() => {
+'use strict';
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const vi = (n, d) => n.toFixed(d).replace('.', ',');
+
+/* ---------- số ngẫu nhiên có hạt giống ---------- */
+function rng(seed) {
+  return () => {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function gaussOf(r) { return () => { let u = 0; while (!u) u = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * r()); }; }
+const R = rng(20261112), gauss = gaussOf(R);
+
+/* ---------- màu ---------- */
+const C = { up: [255, 112, 97], down: [69, 184, 255], signal: [255, 196, 77], slate: [135, 148, 180], white: [233, 237, 248] };
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const COL = {}; for (const k in C) COL[k] = rgba(C[k], 1);
+const TXT = { up: '#ff8a7d', down: '#6cc6ff', signal: '#ffc44d', muted: '#97a3c2', text: '#e9edf8', white: '#e9edf8', slate: '#97a3c2' };
+function makeSprite(c, solid) {
+  const s = 64, cv = document.createElement('canvas'); cv.width = cv.height = s;
+  const g = cv.getContext('2d'), gr = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  if (solid) { gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.2, rgba(c, 1)); gr.addColorStop(.42, rgba(c, .9)); gr.addColorStop(.52, rgba(c, .3)); gr.addColorStop(1, rgba(c, 0)); }
+  else { gr.addColorStop(0, rgba(c, 1)); gr.addColorStop(.28, rgba(c, .72)); gr.addColorStop(.6, rgba(c, .16)); gr.addColorStop(1, rgba(c, 0)); }
+  g.fillStyle = gr; g.fillRect(0, 0, s, s); return cv;
+}
+const SP = {}; for (const k in C) { SP[k] = makeSprite(C[k], false); SP[k + 'S'] = makeSprite(C[k], true); }
+
+/* ---------- dữ liệu mô phỏng ---------- */
+// Biểu đồ núi lửa: [gen, log2FC, -log10(p hiệu chỉnh), log10 biểu hiện trung bình]. Giá trị là mô phỏng.
+const NAMED = [
+  ['MMP7', 3.7, 11.8, 2.7], ['CDH3', 3.2, 9.6, 2.1], ['MMP3', 2.9, 7.9, 1.7], ['THBS2', 2.7, 8.8, 2.4],
+  ['GUCA2A', -4.6, 12.9, 3.0], ['CLCA4', -5.0, 11.4, 2.6], ['GUCA2B', -4.9, 10.2, 2.3], ['CA2', -4.2, 12.0, 3.4],
+  ['AQP8', -4.4, 8.9, 2.0], ['MS4A12', -4.7, 9.7, 2.2], ['CLCA1', -3.9, 10.8, 3.1]
+];
+const VOL = [];
+for (let i = 0; i < 440; i++) {
+  const ex = 0.3 + R() * 3.6, u = R(); let fc;
+  if (u < 0.11) fc = 0.9 + Math.abs(gauss()) * 1.25;
+  else if (u < 0.25) fc = -(0.9 + Math.abs(gauss()) * 1.35);
+  else fc = gauss() * 0.5;
+  fc = clamp(fc, -5.2, 5.2);
+  const nlp = clamp(fc * fc * 0.85 * (0.45 + 0.22 * ex) + Math.abs(gauss()) * 0.55, 0, 13.4);
+  VOL.push({ fc, nlp, ex, name: null });
+}
+for (const [name, fc, nlp, ex] of NAMED) VOL.push({ fc, nlp, ex, name });
+const P_LEVELS = [0.1, 0.05, 0.01, 0.001];
+let fcCut = 1, pCut = -Math.log10(0.05);
+
+// Bộ gen chữ ký và đường cong ROC
+const SIG = ['GUCA2A', 'MMP7', 'CLCA4', 'CA2', 'AQP8', 'CDH3', 'MS4A12', 'GUCA2B', 'MMP3', 'CLCA1'];
+const EFF = [.95, .85, .78, .7, .62, .55, .48, .42, .36, .3];
+const ROC = (() => {
+  const r = rng(4242), g = gaussOf(r), n = 200, sc = [new Float64Array(n), new Float64Array(n)], out = [];
+  for (let k = 0; k < 10; k++) {
+    for (let c = 0; c < 2; c++) for (let i = 0; i < n; i++) sc[c][i] += (c ? -1 : 1) * EFF[k] / 2 + g();
+    const all = [];
+    for (let i = 0; i < n; i++) { all.push([sc[0][i], 1]); all.push([sc[1][i], 0]); }
+    all.sort((a, b) => b[0] - a[0]);
+    let tp = 0, fp = 0, auc = 0; const pts = [[0, 0]];
+    for (const a of all) { if (a[1]) tp++; else { fp++; auc += tp; } pts.push([fp / n, tp / n]); }
+    out.push({ auc: auc / (n * n), pts });
+  }
+  return out;
+})();
+let sigK = 5;
+
+// Đoạn đọc xếp chồng lên hệ gen tham chiếu
+const READS = [];
+(() => {
+  const bins = new Array(46).fill(0), regions = [[-1.45, -0.8], [-0.3, 0.3]];
+  for (let i = 0; i < 58; i++) {
+    const len = 0.22 + R() * 0.16, u = R(); let x0;
+    if (u < 0.5) x0 = regions[0][0] - 0.1 + R() * (regions[0][1] - regions[0][0] - len + 0.2);
+    else if (u < 0.86) x0 = regions[1][0] - 0.1 + R() * (regions[1][1] - regions[1][0] - len + 0.2);
+    else x0 = -1.7 + R() * (2.2 - len);
+    x0 = clamp(x0, -1.7, 0.5 - len);
+    const b0 = Math.floor((x0 + 1.7) / 0.05), b1 = Math.min(45, Math.floor((x0 + len + 1.7) / 0.05));
+    let row = 0; for (let b = b0; b <= b1; b++) row = Math.max(row, bins[b]);
+    for (let b = b0; b <= b1; b++) bins[b] = row + 1;
+    READS.push({ x0, len, row, bad: false, delay: i / 58 * 5.2, sx: (R() - .5) * .5 });
+  }
+  for (let i = 0; i < 7; i++) READS.push({ x0: -1.6 + R() * 1.8, len: .26, row: 0, bad: true, delay: 0.4 + R() * 4.6, sx: (R() - .5) * 1.1 });
+})();
+// Ma trận biểu hiện 8 gen x 6 mẫu (3 bệnh, 3 khỏe)
+const MAT = [];
+for (let c = 0; c < 6; c++) for (let r = 0; r < 8; r++) {
+  const base = (r < 4 ? 1 : -1) * (c < 3 ? 1 : -1);
+  MAT.push(clamp(base * (0.45 + R() * 0.55) + gauss() * 0.12, -1, 1));
+}
+// Phễu chọn gen
+const FUN = []; for (let j = 0; j < 150; j++) FUN.push({ h1: R(), h2: R(), h3: R(), k: j % 3 });
+// Mạng con đường sinh học (minh họa)
+const HUBS = [
+  { n: 'Phân giải chất nền ngoại bào', p: [-1.15, 2.75, .15] },
+  { n: 'Kết dính tế bào', p: [.15, 3.2, -.35] },
+  { n: 'Cân bằng ion, nước, pH', p: [1.2, 2.3, .25] },
+  { n: 'Tín hiệu guanylin, cGMP', p: [1.05, .95, -.25] },
+  { n: 'Chu kỳ tế bào', p: [-1.25, 1.25, -.3] },
+  { n: 'Apoptosis', p: [-.1, .6, .55] }
+];
+const NODES = [];
+(() => {
+  const named = [['MMP7', [0], 'up'], ['MMP3', [0], 'up'], ['THBS2', [0, 1], 'up'], ['CDH3', [1], 'up'],
+    ['CLCA4', [2], 'down'], ['CLCA1', [2], 'down'], ['AQP8', [2], 'down'], ['CA2', [2], 'down'], ['MS4A12', [2], 'down'],
+    ['GUCA2A', [3, 2], 'down'], ['GUCA2B', [3, 2], 'down']];
+  const place = (hubs, rad) => {
+    const b = [0, 0, 0]; for (const h of hubs) for (let i = 0; i < 3; i++) b[i] += HUBS[h].p[i] / hubs.length;
+    const a = R() * TAU, e = (R() - .5) * 1.6;
+    return [b[0] + Math.cos(a) * Math.cos(e) * rad, clamp(b[1] + Math.sin(e) * rad, .35, 3.3), b[2] + Math.sin(a) * Math.cos(e) * rad];
+  };
+  for (const [name, hubs, dir] of named) NODES.push({ name, hubs, dir, p: place(hubs, hubs.length > 1 ? .28 : .58) });
+  for (let i = 0; i < 12; i++) { const h = i < 5 ? 4 : i < 10 ? 5 : 1; NODES.push({ name: null, hubs: [h], dir: R() < .5 ? 'up' : 'down', p: place([h], .5) }); }
+})();
+// Tế bào: ba gen trên chuỗi xoắn
+const GENES = [
+  { name: 'MMP7', t0: .70, t1: .88, col: 'up', healthy: .12, disease: 1 },
+  { name: 'ACTB', t0: .41, t1: .59, col: 'white', healthy: .5, disease: .5 },
+  { name: 'GUCA2A', t0: .12, t1: .30, col: 'down', healthy: 1, disease: .07 }
+];
+const MR = 26, MH = []; for (let i = 0; i < 3 * MR; i++) MH.push({ a: R(), b: R(), c: R() });
+const DUST = []; for (let i = 0; i < 110; i++) { const a = R() * TAU, r = 8 + R() * 7; DUST.push({ x: Math.cos(a) * r, y: -3 + R() * 10, z: Math.sin(a) * r, s: .05 + R() * .07, a: .25 + R() * .45 }); }
+let cond = 0; // 0 mô khỏe, 1 mô bệnh, 2 mẫu vừa nhập
+GENES.forEach(g => { g.rate = g.healthy; g.sample = null; });
+const rateOf = (g, c) => c === 0 ? g.healthy : c === 1 ? g.disease : (g.sample == null ? g.healthy : g.sample);
+
+/* ---------- máy ảnh và phép chiếu ---------- */
+const cv = $('#scene'), ctx = cv.getContext('2d');
+let W = 800, H = 600, DPR = 1, CX = 400, CY = 300, F = 500;
+const RING = 5.2, FLOOR = -1.5;
+const ST = [0, 1, 2, 3, 4].map(i => { const a = i * TAU / 5; return { a, px: Math.sin(a) * RING, pz: Math.cos(a) * RING, rx: Math.cos(a), rz: -Math.sin(a), nx: Math.sin(a), nz: Math.cos(a), f: 1, k: 50, sx: 0, sy: 0 }; });
+const TITLES = ['01 · Dữ liệu công khai', '02 · Xử lý tin sinh học', '03 · Biểu hiện sai khác', '04 · Chọn biomarker', '05 · Con đường sinh học'];
+const cam = { yaw: -0.5, pitch: 0.42, dist: 12.5, tx: 0, ty: -0.2, tz: 0 };
+const goal = Object.assign({}, cam);
+let step = 0, focus = -1;
+const det = [0, 0, 0, 0, 0];
+let sinY = 0, cosY = 1, sinP = 0, cosP = 1, PX = 0, PY = 0, PK = 1, PD = 1, WX = 0, WY = 0, WZ = 0, S_ = ST[0];
+
+function proj(x, y, z) {
+  const vx = x - cam.tx, vy = y - cam.ty, vz = z - cam.tz;
+  const x1 = vx * cosY - vz * sinY, z1 = vx * sinY + vz * cosY;
+  const y2 = vy * cosP - z1 * sinP, z2 = vy * sinP + z1 * cosP;
+  PD = cam.dist - z2; if (PD < 0.5) return false;
+  PK = F / PD; PX = CX + x1 * PK; PY = CY - y2 * PK; return true;
+}
+let fz = 0; // 0 = toàn cảnh, 1 = đang lại gần một trạm: khi đó hậu cảnh lùi hẳn về sau
+const fog = d => clamp(1 - (d - cam.dist) / (7.5 - 2.3 * fz), 0.13 - 0.05 * fz, 1);
+function dot(x, y, z, size, sp, alpha) {
+  if (!proj(x, y, z)) return;
+  const r = Math.max(size * PK, 0.8); if (PX < -r || PX > W + r || PY < -r || PY > H + r) return;
+  const a = alpha * fog(PD); if (a < 0.012) return;
+  ctx.globalAlpha = a > 1 ? 1 : a; ctx.drawImage(sp, PX - r, PY - r, r * 2, r * 2);
+}
+function seg(x1, y1, z1, x2, y2, z2) {
+  if (!proj(x1, y1, z1)) return; const ax = PX, ay = PY;
+  if (!proj(x2, y2, z2)) return; ctx.moveTo(ax, ay); ctx.lineTo(PX, PY);
+}
+function stroke(color, alpha, width) { if (alpha <= 0.004) return; ctx.globalAlpha = alpha > 1 ? 1 : alpha; ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); }
+// toạ độ cục bộ của một trạm: lx sang phải, ly lên trên (tính từ sàn), lz hướng ra ngoài vòng
+function sw(lx, ly, lz) { WX = S_.px + S_.rx * lx + S_.nx * lz; WY = FLOOR + ly; WZ = S_.pz + S_.rz * lx + S_.nz * lz; }
+function sdot(lx, ly, lz, size, sp, alpha) { sw(lx, ly, lz); dot(WX, WY, WZ, size, sp, alpha); }
+function sseg(a, b, c, d, e, f) { sw(a, b, c); const x = WX, y = WY, z = WZ; sw(d, e, f); seg(x, y, z, WX, WY, WZ); }
+function sring(lx, ly, lz, r, n) {
+  let ok = false;
+  for (let i = 0; i <= n; i++) {
+    const a = i / n * TAU; sw(lx + Math.sin(a) * r, ly, lz + Math.cos(a) * r);
+    if (proj(WX, WY, WZ)) { if (ok) ctx.lineTo(PX, PY); else ctx.moveTo(PX, PY); ok = true; } else ok = false;
+  }
+}
+function quad4(p, fill, fa, sa) {
+  const q = [];
+  for (let i = 0; i < 12; i += 3) { sw(p[i], p[i + 1], p[i + 2]); if (!proj(WX, WY, WZ)) return; q.push(PX, PY); }
+  ctx.beginPath(); ctx.moveTo(q[0], q[1]); ctx.lineTo(q[2], q[3]); ctx.lineTo(q[4], q[5]); ctx.lineTo(q[6], q[7]); ctx.closePath();
+  if (fa > 0.003) { ctx.globalAlpha = fa; ctx.fillStyle = fill; ctx.fill(); }
+  if (sa > 0.003) { ctx.globalAlpha = sa; ctx.strokeStyle = fill; ctx.lineWidth = 1; ctx.stroke(); }
+}
+
+/* ---------- nhãn ---------- */
+const labels = [];
+const FONT = {
+  title: '600 13px "Be Vietnam Pro",system-ui,sans-serif',
+  sub: '500 11.5px "Be Vietnam Pro",system-ui,sans-serif',
+  gene: '600 11px "JetBrains Mono",ui-monospace,monospace',
+  deg: '500 10.5px "JetBrains Mono",ui-monospace,monospace'
+};
+const PRI = { title: 0, sub: 1, gene: 2, deg: 3 };
+const widths = new Map();
+function wlabel(x, y, z, text, kind, alpha, dx, dy, color) {
+  if (!proj(x, y, z)) return;
+  const a = alpha * (kind === 'title' ? Math.max(fog(PD), .4 * (1 - fz)) : fog(PD)); if (a < 0.22) return;
+  labels.push({ x: PX + (dx || 0), y: PY + (dy || 0), text, kind, alpha: a > 1 ? 1 : a, color: color || (kind === 'title' ? TXT.text : TXT.muted) });
+}
+function slabel(lx, ly, lz, text, kind, alpha, dx, dy, color) { sw(lx, ly, lz); wlabel(WX, WY, WZ, text, kind, alpha, dx, dy, color); }
+function drawLabels() {
+  const hot = L => L.kind === 'title' && L.color === TXT.signal ? 1 : 0;
+  labels.sort((a, b) => hot(b) - hot(a) || PRI[a.kind] - PRI[b.kind] || b.alpha - a.alpha);
+  const boxes = [];
+  const free = (x, y, w, h) => { for (const b of boxes) if (x < b[0] + b[2] && x + w > b[0] && y < b[1] + b[3] && y + h > b[1]) return false; return true; };
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  for (const L of labels) {
+    ctx.font = FONT[L.kind];
+    const key = L.kind + L.text; let w = widths.get(key); if (w === undefined) { w = ctx.measureText(L.text).width; widths.set(key, w); }
+    const bw = w + 8, bh = 15; let y = L.y;
+    if (!free(L.x - bw / 2, y - bh / 2, bw, bh)) { y = L.y + 14; if (!free(L.x - bw / 2, y - bh / 2, bw, bh)) continue; }
+    if (L.x + bw / 2 < 0 || L.x - bw / 2 > W || y < 0 || y > H) continue;
+    boxes.push([L.x - bw / 2, y - bh / 2, bw, bh]);
+    ctx.globalAlpha = L.alpha; ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(7,11,23,.92)';
+    ctx.strokeText(L.text, L.x, y); ctx.fillStyle = L.color; ctx.fillText(L.text, L.x, y);
+  }
+  labels.length = 0;
+}
+
+/* ---------- cảnh: sàn, dòng dữ liệu, tế bào ---------- */
+function drawFloor() {
+  const chunks = 30, per = 4;
+  for (let c = 0; c < chunks; c++) {
+    const a0 = c / chunks * TAU, am = (c + .5) / chunks * TAU;
+    if (!proj(Math.sin(am) * RING, FLOOR, Math.cos(am) * RING)) continue;
+    const f = fog(PD);
+    ctx.beginPath();
+    for (let i = 0; i < per; i++) {
+      const a = a0 + i / per * TAU / chunks, b = a0 + (i + 1) / per * TAU / chunks;
+      seg(Math.sin(a) * RING, FLOOR, Math.cos(a) * RING, Math.sin(b) * RING, FLOOR, Math.cos(b) * RING);
+    }
+    stroke(COL.slate, .42 * f, 1.1);
+  }
+  for (let i = 0; i < 72; i++) {
+    const a = i / 72 * TAU, long = i % 6 === 0, r1 = RING - (long ? .34 : .18), s = Math.sin(a), c = Math.cos(a);
+    if (!proj(s * RING, FLOOR, c * RING)) continue; const f = fog(PD);
+    ctx.beginPath(); seg(s * r1, FLOOR, c * r1, s * RING, FLOOR, c * RING); stroke(COL.slate, (long ? .5 : .3) * f, 1);
+  }
+  // vòng trong quanh tế bào
+  ctx.beginPath();
+  for (let i = 0; i < 48; i++) { const a = i / 48 * TAU, b = (i + 1) / 48 * TAU; seg(Math.sin(a) * 1.7, FLOOR, Math.cos(a) * 1.7, Math.sin(b) * 1.7, FLOOR, Math.cos(b) * 1.7); }
+  proj(0, FLOOR, 0); stroke(step === 0 ? COL.signal : COL.slate, (step === 0 ? .5 : .3) * fog(PD), 1.1);
+}
+const THIN = [1, 1, 2, 5], FLOW_N = 120;
+function drawFlow(T) {
+  for (let j = 0; j < FLOW_N; j++) {
+    const u = (j / FLOW_N + T * .028) % 1, s = Math.min(3, Math.floor(u * 4)); if (j % THIN[s]) continue;
+    const a = u * (TAU * 4 / 5), r = RING + Math.sin(j * 1.7) * .12;
+    const sp = s === 0 ? SP.slate : s === 1 ? SP.white : s === 2 ? ((j >> 1) & 1 ? SP.up : SP.down) : SP.signal;
+    dot(Math.sin(a) * r, FLOOR + .12 + .06 * Math.sin(j * 2.3 + T), Math.cos(a) * r, s === 3 ? .11 : .08, sp, .85);
+  }
+}
+const HN = 64, HR = .62, HY0 = FLOOR + .35, HH = 4.0, HT = 2.6;
+function drawCell(T) {
+  const spin = T * .22;
+  proj(0, .6, 0); const f = fog(PD);
+  ctx.beginPath();
+  for (let i = 0; i <= HN; i += 2) { const u = i / HN, y = HY0 + u * HH, a = u * HT * TAU + spin, x = Math.cos(a) * HR, z = Math.sin(a) * HR; seg(x, y, z, -x, y, -z); }
+  stroke(COL.slate, .34 * f, 1);
+  for (let i = 0; i <= HN; i++) {
+    const u = i / HN, y = HY0 + u * HH, a = u * HT * TAU + spin, x = Math.cos(a) * HR, z = Math.sin(a) * HR;
+    let sp = SP.slate, sz = .13, al = .8;
+    for (const g of GENES) if (u >= g.t0 && u <= g.t1) { sp = SP[g.col]; sz = .2; al = 1; }
+    dot(x, y, z, sz, sp, al); dot(-x, y, -z, sz, sp, al);
+  }
+  for (let gi = 0; gi < 3; gi++) {
+    const g = GENES[gi], rate = g.rate, ym = HY0 + (g.t0 + g.t1) / 2 * HH, hh = (g.t1 - g.t0) * HH;
+    for (let j = 0; j < MR; j++) {
+      const vis = clamp((rate - (j + .5) / MR) * MR + .5, 0, 1); if (vis <= 0) continue;
+      const h = MH[gi * MR + j], ph = (T * .14 + h.a) % 1, a = h.b * TAU + ph * .9 + T * .05;
+      const y = ym + (h.c - .5) * hh + ph * .5 * (h.c - .3), al = vis * Math.pow(Math.sin(Math.PI * ph), .6);
+      for (let q = 0; q < 3; q++) {
+        const r = HR + .25 + ph * 2.5 - q * .1;
+        dot(Math.cos(a) * r, y + Math.sin(ph * 9 + j + q * .6) * .06, Math.sin(a) * r, .1 - q * .02, SP[g.col], al * (1 - q * .28));
+      }
+    }
+    const la = step === 0 ? 1 : .5;
+    if (proj(0, ym, 0)) { const a = la * Math.max(fog(PD), .3); if (a > .22) labels.push({ x: PX + PK * (HR + .45) + 22, y: PY, text: g.name, kind: 'gene', alpha: a, color: TXT[g.col] }); }
+  }
+  wlabel(0, HY0 + HH + .4, 0, 'Tế bào · DNA → mRNA', 'title', step === 0 ? 1 : .7, 0, 0, step === 0 ? TXT.signal : TXT.text);
+}
+
+/* ---------- cảnh: năm trạm ---------- */
+function drawDB(T, s, d) {
+  const f = s.f, names = ['GEO', 'TCGA'];
+  for (let c = 0; c < 2; c++) {
+    const cx = c ? .9 : -.9;
+    for (let k = 0; k < 3; k++) {
+      const y0 = .3 + k * .68;
+      ctx.beginPath(); sring(cx, y0, 0, .62, 28); sring(cx, y0 + .5, 0, .62, 28);
+      for (let j = 0; j < 8; j++) { const a = j / 8 * TAU, x = cx + Math.sin(a) * .62, z = Math.cos(a) * .62; sseg(x, y0, z, x, y0 + .5, z); }
+      stroke(COL.white, .45 * f, 1.1);
+      ctx.beginPath(); sring(cx, y0 + .25, 0, .62, 28); stroke(COL.slate, .32 * f, 1);
+      for (let j = 0; j < 9; j++) {
+        const a = j / 9 * TAU + k * .5 + T * .25 * (c ? -1 : 1), on = .3 + .7 * Math.max(0, Math.sin(T * 1.7 + j * 2.1 + k * 1.3 + c * 4));
+        sdot(cx + Math.sin(a) * .62, y0 + .25, Math.cos(a) * .62, .075, SP.white, on * .9);
+      }
+    }
+    for (let j = 0; j < 12; j++) {
+      const ph = (T * .2 + j / 12 + c * .37) % 1, a = j * 2.4 + c;
+      sdot(cx + Math.sin(a) * .34 * (1 - ph), 2.35 + ph * .85, Math.cos(a) * .34 * (1 - ph), .085, j % 2 ? SP.white : SP.slate, Math.sin(Math.PI * ph) * .9);
+    }
+    slabel(cx, 2.52, 0, names[c], 'gene', Math.max(d, .75), 0, 0, TXT.text);
+  }
+  if (d > .05) slabel(0, 3.22, 0, 'Bộ dữ liệu: mô bệnh và mô lành', 'sub', d);
+}
+function drawPipe(T, s, d) {
+  const f = s.f, tc = T % 10, fade = tc > 9 ? 1 - (tc - 9) : 1;
+  ctx.beginPath(); sseg(-1.75, .38, 0, .55, .38, 0); stroke(COL.slate, .7 * f, 2);
+  ctx.beginPath(); sseg(-1.45, .38, 0, -.8, .38, 0); sseg(-.3, .38, 0, .3, .38, 0); stroke(COL.white, .95 * f, 3.2);
+  ctx.beginPath(); for (let i = 0; i <= 22; i++) { const x = -1.75 + i * .1045; sseg(x, .38, 0, x, .3, 0); } stroke(COL.slate, .45 * f, 1);
+  const lw = clamp(.05 * s.k, 1.2, 5);
+  ctx.beginPath();
+  for (const r of READS) {
+    if (r.bad) continue; const lt = tc - r.delay; if (lt <= 0) continue;
+    const p = clamp(lt / .9, 0, 1), e = 1 - (1 - p) * (1 - p), y = lerp(3.15, .55 + r.row * .105, e), x = r.x0 + r.sx * (1 - e);
+    sseg(x, y, 0, x + r.len, y, 0);
+  }
+  stroke(COL.white, .8 * f * fade, lw);
+  for (const r of READS) {
+    if (!r.bad) continue; const lt = tc - r.delay; if (lt <= 0 || lt > 1.4) continue;
+    const p = lt / 1.4, y = lerp(3.15, 1.9, p), x = r.x0 + p * r.sx;
+    ctx.beginPath(); sseg(x, y, 0, x + r.len, y, 0); stroke(COL.slate, (1 - p) * .7 * f * fade, lw);
+  }
+  for (let c = 0; c < 6; c++) for (let r = 0; r < 8; r++) {
+    const at = 2.2 + (c * 8 + r) / 48 * 5.2, a = clamp((tc - at) * 3, 0, 1) * fade; if (a <= 0) continue;
+    const v = MAT[c * 8 + r], x0 = .82 + c * .165 + (c > 2 ? .08 : 0), y0 = .52 + (7 - r) * .165;
+    quad4([x0, y0, 0, x0 + .14, y0, 0, x0 + .14, y0 + .14, 0, x0, y0 + .14, 0], v > 0 ? COL.up : COL.down, a * f * (.22 + .78 * Math.abs(v)), 0);
+  }
+  quad4([.78, .48, 0, 1.33, .48, 0, 1.33, 1.86, 0, .78, 1.86, 0], COL.slate, 0, .4 * f);
+  quad4([1.355, .48, 0, 1.905, .48, 0, 1.905, 1.86, 0, 1.355, 1.86, 0], COL.slate, 0, .4 * f);
+  if (d > .05) {
+    slabel(-.6, 3.28, 0, 'Đoạn đọc ngắn (reads)', 'sub', d);
+    slabel(-.6, .12, 0, 'Hệ gen tham chiếu', 'sub', d);
+    slabel(1.34, 2.08, 0, 'Ma trận biểu hiện', 'sub', d);
+    slabel(1.055, .3, 0, 'bệnh', 'deg', d, 0, 0, TXT.up); slabel(1.63, .3, 0, 'khỏe', 'deg', d, 0, 0, TXT.down);
+  }
+}
+const VX = .31, VY = .19, VZ = .4, VY0 = .35;
+function drawVolcano(T, s, d) {
+  const f = s.f, top = VY0 + 13.6 * VY;
+  ctx.beginPath();
+  sseg(-1.75, VY0, -.85, 1.75, VY0, -.85); sseg(-1.75, VY0, .85, 1.75, VY0, .85);
+  sseg(-1.75, VY0, -.85, -1.75, VY0, .85); sseg(1.75, VY0, -.85, 1.75, VY0, .85);
+  sseg(-1.75, VY0, -.85, -1.75, top, -.85); sseg(0, VY0, -.85, 0, top, -.85);
+  stroke(COL.slate, .42 * f, 1);
+  const xc = Math.min(fcCut * VX, 1.75), yc = VY0 + pCut * VY;
+  quad4([xc, VY0, -.85, xc, VY0, .85, xc, top, .85, xc, top, -.85], COL.up, .05 * f, .38 * f);
+  quad4([-xc, VY0, -.85, -xc, VY0, .85, -xc, top, .85, -xc, top, -.85], COL.down, .05 * f, .38 * f);
+  quad4([-1.75, yc, -.85, 1.75, yc, -.85, 1.75, yc, .85, -1.75, yc, .85], COL.white, .035 * f, .3 * f);
+  for (const g of VOL) {
+    const sig = g.nlp >= pCut, up = sig && g.fc >= fcCut, dn = sig && g.fc <= -fcCut;
+    const x = g.fc * VX, y = VY0 + g.nlp * VY, z = (g.ex - 2) * VZ;
+    if (g.name) {
+      sdot(x, y, z, .17, up ? SP.upS : dn ? SP.downS : SP.slateS, .95);
+      if (d > .05) slabel(x, y, z, g.name, 'gene', d, 0, -13, up ? TXT.up : dn ? TXT.down : TXT.muted);
+    } else sdot(x, y, z, up || dn ? .085 : .055, up ? SP.up : dn ? SP.down : SP.slate, up || dn ? .9 : .3);
+  }
+  if (d > .05) {
+    slabel(0, VY0 - .22, .85, 'log2FC', 'sub', d);
+    slabel(-1.75, top + .16, -.85, '−log10(p hiệu chỉnh)', 'sub', d);
+    slabel(1.75, VY0 - .22, 0, 'biểu hiện TB', 'sub', d, 20, 0);
+  }
+}
+const LAMP_SLOT = [4, 5, 3, 6, 2, 7, 1, 8, 0, 9];
+function drawFunnel(T, s, d) {
+  const f = s.f, yTop = 3.1, yBot = 1.45;
+  ctx.beginPath();
+  sring(0, 3.1, 0, 1.3, 40); sring(0, 2.55, 0, .95, 36); sring(0, 2.0, 0, .6, 30); sring(0, 1.45, 0, .26, 24);
+  for (let j = 0; j < 10; j++) { const a = j / 10 * TAU; sseg(Math.sin(a) * 1.3, 3.1, Math.cos(a) * 1.3, Math.sin(a) * .26, 1.45, Math.cos(a) * .26); }
+  stroke(COL.slate, .32 * f, 1);
+  for (const p of FUN) {
+    const ph = (T * .09 + p.h1) % 1, y = yTop - ph * (yTop - yBot), r = lerp(1.25, .22, ph) * Math.sqrt(p.h2), a = p.h3 * TAU + ph * 5 + T * .2;
+    sdot(Math.sin(a) * r, y, Math.cos(a) * r, .075, p.k === 0 ? SP.up : p.k === 1 ? SP.down : SP.slate, Math.min(1, ph * 8) * (1 - ph * ph * ph) * .85);
+  }
+  for (let j = 0; j < 10; j++) {
+    const slot = LAMP_SLOT[j], ang = (slot - 4.5) / 4.5 * 1.25, x = Math.sin(ang) * 1.62, z = Math.cos(ang) * .9 - .1, y = .58;
+    if (j < sigK) {
+      ctx.beginPath(); sseg(0, 1.42, 0, x, y + .1, z); stroke(COL.signal, .3 * f, 1);
+      sdot(x, y, z, .3 * (.84 + .16 * Math.sin(T * 2.4 + j * .9)), SP.signalS, 1);
+      const ph = (T * .5 + j * .13) % 1; sdot(lerp(0, x, ph), lerp(1.42, y + .1, ph), lerp(0, z, ph), .07, SP.signal, .9 * (1 - ph));
+      if (d > .05) slabel(x, y, z, SIG[j], 'gene', d, 0, slot % 2 ? 31 : 18, TXT.signal);
+    } else sdot(x, y, z, .11, SP.slate, .5);
+  }
+  if (d > .05) slabel(0, 3.3, 0, 'Hàng trăm gen sai khác', 'sub', d);
+}
+function drawNet(T, s, d) {
+  const f = s.f, w = .3 * Math.sin(T * .25), cw = Math.cos(w), swn = Math.sin(w);
+  const rot = p => [p[0] * cw + p[2] * swn, p[1], -p[0] * swn + p[2] * cw];
+  const hp = HUBS.map(h => rot(h.p));
+  ctx.beginPath();
+  for (const n of NODES) { const p = rot(n.p); n.q = p; for (const h of n.hubs) sseg(p[0], p[1], p[2], hp[h][0], hp[h][1], hp[h][2]); }
+  stroke(COL.slate, .4 * f, 1);
+  let i = 0;
+  for (const n of NODES) {
+    const p = n.q, chosen = n.name && SIG.indexOf(n.name) > -1 && SIG.indexOf(n.name) < sigK;
+    for (const h of n.hubs) { const ph = (T * .35 + i * .37) % 1; sdot(lerp(p[0], hp[h][0], ph), lerp(p[1], hp[h][1], ph), lerp(p[2], hp[h][2], ph), .055, SP.white, .8 * Math.sin(Math.PI * ph)); i++; }
+    if (n.name) {
+      sdot(p[0], p[1], p[2], chosen ? .2 : .15, chosen ? SP.signalS : SP[n.dir + 'S'], .95);
+      if (d > .05) slabel(p[0], p[1], p[2], n.name, 'gene', d, 0, 14, chosen ? TXT.signal : TXT[n.dir]);
+    } else sdot(p[0], p[1], p[2], .09, SP[n.dir], .8);
+  }
+  for (let h = 0; h < HUBS.length; h++) {
+    const p = hp[h]; sdot(p[0], p[1], p[2], .34, SP.white, .5); sdot(p[0], p[1], p[2], .2, SP.whiteS, 1);
+    if (d > .05) slabel(p[0], p[1], p[2], HUBS[h].n, 'sub', d, 0, -17, TXT.text);
+  }
+}
+const DRAW = [drawDB, drawPipe, drawVolcano, drawFunnel, drawNet];
+
+/* ---------- la bàn góc nhìn ---------- */
+function drawDial() {
+  const x = 48, y = H - 46, r = 24;
+  ctx.globalAlpha = 1; ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(151,163,194,.45)';
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
+  for (let i = 0; i < 5; i++) {
+    const rel = ST[i].a - cam.yaw, tx = x + Math.sin(rel) * r, ty = y + Math.cos(rel) * r;
+    ctx.beginPath(); ctx.arc(tx, ty, focus === i ? 4 : 2.6, 0, TAU); ctx.fillStyle = focus === i ? TXT.signal : TXT.muted; ctx.fill();
+  }
+  ctx.beginPath(); ctx.moveTo(x, y + r + 8); ctx.lineTo(x - 4, y + r + 14); ctx.lineTo(x + 4, y + r + 14); ctx.closePath(); ctx.fillStyle = TXT.text; ctx.fill();
+  const deg = Math.round((((cam.yaw % TAU) + TAU) % TAU) * 180 / Math.PI) % 360;
+  ctx.font = FONT.gene; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = TXT.text; ctx.fillText(deg + '°', x, y);
+}
+
+/* ---------- vòng lặp vẽ ---------- */
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let autoRot = !reduced, dragging = false, userMoved = false, lastInput = -10, swayBase = 0, swayT0 = 0;
+let T = reduced ? 7.6 : 0, last = 0, visible = true, tour = null;
+
+function render(now, dt) {
+  // máy ảnh
+  if (autoRot && !dragging) {
+    if (focus < 0) { if (now - lastInput > 2.2) goal.yaw += dt * .11; }
+    else if (!userMoved) goal.yaw = swayBase + .16 * Math.sin((now - swayT0) * .4);
+  }
+  const kc = reduced ? 1 : 1 - Math.exp(-dt * (dragging ? 18 : 3.4));
+  for (const k in cam) cam[k] += (goal[k] - cam[k]) * kc;
+  { const kr = reduced ? 1 : 1 - Math.exp(-dt * 2.5); for (const g of GENES) g.rate += (rateOf(g, cond) - g.rate) * kr; }
+  sinY = Math.sin(cam.yaw); cosY = Math.cos(cam.yaw); sinP = Math.sin(cam.pitch); cosP = Math.cos(cam.pitch);
+  const kd = reduced ? 1 : 1 - Math.exp(-dt * 4);
+  fz += ((focus >= 0 ? 1 : 0) - fz) * kd;
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  ctx.fillStyle = '#070b17'; ctx.fillRect(0, 0, W, H);
+  const bg = ctx.createRadialGradient(CX, CY * .92, 0, CX, CY * .92, Math.max(W, H) * .68);
+  bg.addColorStop(0, 'rgba(40,62,128,.30)'); bg.addColorStop(1, 'rgba(40,62,128,0)');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of DUST) dot(p.x, p.y, p.z, p.s, SP.slate, p.a);
+  drawFloor(); drawFlow(T); drawCell(T);
+  for (let i = 0; i < 5; i++) {
+    const s = ST[i]; S_ = s;
+    proj(s.px, FLOOR + 1.6, s.pz); s.f = fog(PD); s.k = PK; s.sx = PX; s.sy = PY;
+    det[i] += ((focus === i ? 1 : 0) - det[i]) * kd;
+    ctx.beginPath(); sring(0, 0, 0, 2.05, 44); stroke(focus === i ? COL.signal : COL.slate, (focus === i ? .55 : .3) * s.f, 1.2);
+    DRAW[i](T, s, det[i]);
+    slabel(0, 3.66, 0, TITLES[i], 'title', 1, 0, 0, focus === i ? TXT.signal : TXT.text);
+    slabel(0, 0, 2.3, (i * 72) + '°', 'deg', .85);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  drawLabels(); drawDial(); ctx.globalAlpha = 1;
+}
+function frame(ts) {
+  requestAnimationFrame(frame);
+  const now = ts / 1000, dt = Math.min(Math.max(now - last, 0), .05); last = now;
+  if (!visible) return;
+  if (!reduced) T += dt;
+  if (tour) tickTour(now);
+  render(now, dt);
+}
+
+/* ---------- góc nhìn theo bước ---------- */
+function applyView() {
+  if (step === 0) {
+    goal.tx = 0; goal.ty = -.75; goal.tz = 0; goal.pitch = .4;
+    goal.dist = Math.max(13, 7.6 * F / (W / 2 - 8));
+  } else {
+    const s = ST[step - 1];
+    goal.tx = s.px * .96; goal.tz = s.pz * .96; goal.ty = FLOOR + 1.85; goal.pitch = .16;
+    goal.dist = Math.max(2.1 * F / (W / 2 - 14), 4.0 * F / (H * .86)) + .5;
+    goal.yaw = s.a + Math.round((cam.yaw - s.a) / TAU) * TAU;
+    swayBase = goal.yaw; swayT0 = performance.now() / 1000; userMoved = false;
+  }
+}
+function setStep(n) {
+  step = n; focus = n - 1;
+  $$('.step').forEach((li, i) => {
+    const on = i === n; li.classList.toggle('is-on', on);
+    $('.step-head', li).setAttribute('aria-expanded', on ? 'true' : 'false'); $('.step-body', li).hidden = !on;
+  });
+  applyView();
+}
+function resize() {
+  const r = cv.getBoundingClientRect(); W = Math.max(200, r.width); H = Math.max(200, r.height);
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  CX = W / 2; CY = H / 2; F = .95 * Math.min(H, W * .9);
+  const first = !resize.done; resize.done = true;
+  if (!userMoved || first) { const y = goal.yaw; applyView(); if (focus < 0) goal.yaw = y; }
+  if (first) Object.assign(cam, goal);
+}
+
+/* ---------- chạy cả quy trình ---------- */
+const btnTour = $('#btnTour');
+function startTour() { tour = { i: 0, next: performance.now() / 1000 + 6.5, flip: performance.now() / 1000 + 3 }; setCond(0); setStep(0); btnTour.textContent = 'Dừng'; }
+function stopTour() { if (!tour) return; tour = null; btnTour.textContent = 'Chạy cả quy trình'; }
+function tickTour(now) {
+  if (tour.flip && now > tour.flip) { tour.flip = 0; setCond(1); }
+  if (now > tour.next) {
+    if (tour.i < 5) { tour.i++; setStep(tour.i); tour.next = now + 7; }
+    else stopTour();
+  }
+}
+
+/* ---------- bảng điều khiển ---------- */
+function setCond(c) {
+  cond = c;
+  [['#condH', 0], ['#condD', 1], ['#condU', 2]].forEach(([id, v]) => { const b = $(id); b.classList.toggle('is-on', c === v); b.setAttribute('aria-pressed', c === v ? 'true' : 'false'); });
+  GENES.forEach((g, i) => { const v = Math.round(rateOf(g, c) * 100); $('#bar' + i).style.width = v + '%'; $('#val' + i).textContent = v; });
+}
+function updVolcano() {
+  fcCut = +$('#fc').value; const p = P_LEVELS[+$('#pv').value]; pCut = -Math.log10(p);
+  let up = 0, down = 0;
+  for (const g of VOL) if (g.nlp >= pCut) { if (g.fc >= fcCut) up++; else if (g.fc <= -fcCut) down++; }
+  $('#fcOut').textContent = vi(fcCut, 1); $('#pvOut').textContent = String(p).replace('.', ',');
+  $('#nUp').textContent = up; $('#nDown').textContent = down; $('#nNs').textContent = VOL.length - up - down;
+}
+function drawROC() {
+  const c = $('#roc'), g = c.getContext('2d'), d = Math.min(2, window.devicePixelRatio || 1), S = 168;
+  c.width = c.height = S * d; g.setTransform(d, 0, 0, d, 0, 0);
+  const ml = 26, mb = 22, mt = 6, mr = 6, w = S - ml - mr, h = S - mt - mb;
+  g.clearRect(0, 0, S, S);
+  g.strokeStyle = 'rgba(151,163,194,.22)'; g.lineWidth = 1; g.beginPath();
+  for (let i = 0; i <= 4; i++) { const x = ml + w * i / 4, y = mt + h * i / 4; g.moveTo(x, mt); g.lineTo(x, mt + h); g.moveTo(ml, y); g.lineTo(ml + w, y); }
+  g.stroke();
+  g.setLineDash([3, 3]); g.strokeStyle = 'rgba(151,163,194,.6)'; g.beginPath(); g.moveTo(ml, mt + h); g.lineTo(ml + w, mt); g.stroke(); g.setLineDash([]);
+  const pts = ROC[sigK - 1].pts;
+  g.beginPath(); g.moveTo(ml, mt + h); for (const p of pts) g.lineTo(ml + p[0] * w, mt + h - p[1] * h); g.lineTo(ml + w, mt + h); g.closePath();
+  g.fillStyle = 'rgba(255,196,77,.14)'; g.fill();
+  g.beginPath(); pts.forEach((p, i) => { const X = ml + p[0] * w, Y = mt + h - p[1] * h; if (i) g.lineTo(X, Y); else g.moveTo(X, Y); });
+  g.strokeStyle = '#ffc44d'; g.lineWidth = 2; g.lineJoin = 'round'; g.stroke();
+  g.fillStyle = '#97a3c2'; g.font = '500 10px "JetBrains Mono",ui-monospace,monospace'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  g.fillText('1 − độ đặc hiệu', ml + w / 2, S - 5);
+  g.save(); g.translate(10, mt + h / 2); g.rotate(-Math.PI / 2); g.fillText('độ nhạy', 0, 0); g.restore();
+  g.textAlign = 'right'; g.fillText('1', ml - 5, mt + 9); g.fillText('0', ml - 5, mt + h);
+}
+function updSig() {
+  sigK = +$('#k').value; $('#kOut').textContent = sigK;
+  $('#auc').textContent = vi(ROC[sigK - 1].auc, 2);
+  $('#sigList').textContent = SIG.slice(0, sigK).join(' · ');
+  drawROC();
+}
+
+/* ---------- tương tác ---------- */
+const nowS = () => performance.now() / 1000;
+const pts = new Map(); let down = null, pinch0 = 0;
+cv.addEventListener('pointerdown', e => {
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pts.size === 1) { down = { x: e.clientX, y: e.clientY, t: nowS(), moved: 0 }; dragging = true; }
+  if (pts.size === 2) { const a = Array.from(pts.values()); pinch0 = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y); }
+  stopTour(); lastInput = nowS();
+});
+cv.addEventListener('pointermove', e => {
+  const p = pts.get(e.pointerId); if (!p) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y; p.x = e.clientX; p.y = e.clientY; lastInput = nowS();
+  if (pts.size === 1) {
+    if (down) down.moved += Math.abs(dx) + Math.abs(dy);
+    goal.yaw -= dx * .0065; goal.pitch = clamp(goal.pitch + dy * .005, -.12, 1.25);
+    if (down && down.moved > 6) userMoved = true;
+  } else if (pts.size === 2) {
+    const a = Array.from(pts.values()), dd = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+    if (pinch0 > 0) goal.dist = clamp(goal.dist * pinch0 / dd, 2.8, 20); pinch0 = dd; userMoved = true;
+  }
+});
+function endPointer(e, cancelled) {
+  if (!pts.has(e.pointerId)) return; pts.delete(e.pointerId);
+  if (pts.size === 0) {
+    dragging = false;
+    if (!cancelled && down && down.moved < 6 && nowS() - down.t < .5) pick(e);
+    down = null;
+  }
+}
+cv.addEventListener('pointerup', e => endPointer(e, false));
+cv.addEventListener('pointercancel', e => endPointer(e, true));
+function pick(e) {
+  const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  let best = -2, bd = 1e9;
+  for (let i = 0; i < 5; i++) { const s = ST[i], d = Math.hypot(x - s.sx, y - s.sy), lim = Math.max(56, 1.7 * s.k); if (d < lim && d < bd) { bd = d; best = i; } }
+  if (proj(0, .5, 0)) { const d = Math.hypot(x - PX, y - PY); if (d < Math.max(50, 1.5 * PK) && d < bd) { bd = d; best = -1; } }
+  if (best > -2 && best + 1 !== step) setStep(best + 1);
+}
+cv.addEventListener('wheel', e => {
+  if (!(e.ctrlKey || e.metaKey)) return; e.preventDefault();
+  goal.dist = clamp(goal.dist * Math.exp(e.deltaY * .0022), 2.8, 20); lastInput = nowS(); stopTour();
+}, { passive: false });
+cv.addEventListener('keydown', e => {
+  let used = true;
+  if (e.key === 'ArrowLeft') goal.yaw += .16; else if (e.key === 'ArrowRight') goal.yaw -= .16;
+  else if (e.key === 'ArrowUp') goal.pitch = clamp(goal.pitch + .08, -.12, 1.25); else if (e.key === 'ArrowDown') goal.pitch = clamp(goal.pitch - .08, -.12, 1.25);
+  else if (e.key === '+' || e.key === '=') goal.dist = clamp(goal.dist * .87, 2.8, 20); else if (e.key === '-' || e.key === '_') goal.dist = clamp(goal.dist * 1.15, 2.8, 20);
+  else if (e.key >= '0' && e.key <= '5') { stopTour(); setStep(+e.key); used = false; e.preventDefault(); }
+  else used = false;
+  if (used) { e.preventDefault(); userMoved = true; lastInput = nowS(); stopTour(); }
+});
+$$('.step-head').forEach((b, i) => b.addEventListener('click', () => { stopTour(); setStep(i); }));
+btnTour.addEventListener('click', () => { if (tour) stopTour(); else startTour(); });
+const btnSpin = $('#btnSpin');
+btnSpin.setAttribute('aria-pressed', autoRot ? 'true' : 'false');
+btnSpin.addEventListener('click', () => { autoRot = !autoRot; btnSpin.setAttribute('aria-pressed', autoRot ? 'true' : 'false'); if (autoRot && focus >= 0) { swayBase = goal.yaw; swayT0 = nowS(); userMoved = false; } lastInput = -10; });
+$('#btnIn').addEventListener('click', () => { goal.dist = clamp(goal.dist * .82, 2.8, 20); userMoved = true; stopTour(); });
+$('#btnOut').addEventListener('click', () => { goal.dist = clamp(goal.dist * 1.22, 2.8, 20); userMoved = true; stopTour(); });
+$('#btnHome').addEventListener('click', () => { stopTour(); setStep(0); lastInput = -10; });
+$('#condH').addEventListener('click', () => { stopTour(); setCond(0); });
+$('#condD').addEventListener('click', () => { stopTour(); setCond(1); });
+$('#condU').addEventListener('click', () => { stopTour(); setCond(2); });
+$('#fc').addEventListener('input', updVolcano); $('#pv').addEventListener('input', updVolcano);
+$('#k').addEventListener('input', updSig);
+
+/* ---------- lõi học máy: dữ liệu mô phỏng, bốn mô hình, chỉ số, SHAP, Kaplan-Meier ---------- */
+// Mức biểu hiện tham chiếu theo log2(TPM + 1): [trung bình, độ lệch chuẩn]. n = mô lành, t = mô ung thư thuần.
+const PG = [
+  { g: 'GUCA2A', n: [8.6, 2.0], t: [5.0, 2.4] },
+  { g: 'MMP7', n: [2.6, 1.6], t: [5.6, 2.2] },
+  { g: 'CLCA4', n: [7.6, 2.1], t: [4.2, 2.3] },
+  { g: 'CA2', n: [9.2, 1.7], t: [6.4, 2.1] },
+  { g: 'AQP8', n: [6.4, 2.2], t: [3.2, 2.0] },
+  { g: 'CDH3', n: [2.9, 1.5], t: [5.5, 2.0] }
+];
+const NF = PG.length, PMAX = 15, N_TRAIN = 150, N_TEST = 200, N_SURV = 240;
+
+// Một mẫu mô phỏng. Mẫu ung thư có "độ thuần khối u" 0,35 đến 1: mẫu lẫn nhiều mô lành thì khó phân loại hơn,
+// giống dữ liệu thật. Vì thế không mô hình nào đạt 100%.
+function simOne(cls, r, g) {
+  const pur = cls ? 0.35 + 0.65 * r() : 0;
+  return PG.map(p => clamp(p.n[0] + pur * (p.t[0] - p.n[0]) + g() * (p.n[1] + pur * (p.t[1] - p.n[1])), 0, PMAX));
+}
+function simSet(nPerClass, seed) {
+  const r = rng(seed), g = gaussOf(r), X = [], y = [];
+  for (let c = 0; c < 2; c++) for (let i = 0; i < nPerClass; i++) { X.push(simOne(c, r, g)); y.push(c); }
+  return { X, y };
+}
+const TRAIN = simSet(N_TRAIN, 606), TEST = simSet(N_TEST, 909);
+
+// Trung bình và độ lệch chuẩn theo từng nhóm trong tập huấn luyện: dùng để vẽ dải tham chiếu và nhận định từng gen
+const STAT = [0, 1].map(c => PG.map((p, j) => {
+  const v = TRAIN.X.filter((x, i) => TRAIN.y[i] === c).map(x => x[j]), m = v.reduce((a, b) => a + b, 0) / v.length;
+  return [m, Math.sqrt(v.reduce((a, b) => a + (b - m) * (b - m), 0) / (v.length - 1))];
+}));
+// Chuẩn hóa z-score (cho hồi quy logistic và SVM)
+const SCALE = PG.map((p, j) => {
+  const v = TRAIN.X.map(x => x[j]), m = v.reduce((a, b) => a + b, 0) / v.length;
+  return [m, Math.sqrt(v.reduce((a, b) => a + (b - m) * (b - m), 0) / v.length)];
+});
+const zOf = x => x.map((v, j) => (v - SCALE[j][0]) / SCALE[j][1]);
+const sigmoid = t => 1 / (1 + Math.exp(-t));
+
+/* --- 1. Random Forest: 60 cây, sâu tối đa 4, mỗi nút thử 2 gen ngẫu nhiên --- */
+function growTree(X, y, idx, depth, r) {
+  const n = idx.length; let n1 = 0; for (const i of idx) n1 += y[i];
+  const node = { p: n1 / n };
+  if (depth >= 4 || n < 10 || n1 === 0 || n1 === n) return node;
+  const f1 = Math.floor(r() * NF); let f2 = Math.floor(r() * (NF - 1)); if (f2 >= f1) f2++;
+  let best = null;
+  for (const f of [f1, f2]) {
+    const v = idx.map(i => [X[i][f], y[i]]).sort((a, b) => a[0] - b[0]);
+    let l1 = 0;
+    for (let k = 1; k < n; k++) {
+      l1 += v[k - 1][1];
+      if (v[k][0] === v[k - 1][0] || k < 5 || n - k < 5) continue;
+      const pl = l1 / k, pr = (n1 - l1) / (n - k), gini = k * pl * (1 - pl) + (n - k) * pr * (1 - pr);
+      if (!best || gini < best.gini) best = { gini, f, thr: (v[k][0] + v[k - 1][0]) / 2 };
+    }
+  }
+  if (!best) return node;
+  const lo = [], hi = []; for (const i of idx) (X[i][best.f] <= best.thr ? lo : hi).push(i);
+  node.f = best.f; node.thr = best.thr; node.l = growTree(X, y, lo, depth + 1, r); node.r = growTree(X, y, hi, depth + 1, r);
+  return node;
+}
+const N_TREES = 60;
+const RF = (() => {
+  const r = rng(11), trees = [], n = TRAIN.X.length;
+  for (let t = 0; t < N_TREES; t++) {
+    const idx = []; for (let i = 0; i < n; i++) idx.push(Math.floor(r() * n));
+    trees.push(growTree(TRAIN.X, TRAIN.y, idx, 0, r));
+  }
+  return trees;
+})();
+// Trải các cây thành mảng phẳng để duyệt nhanh: SHAP gọi rừng cây hàng nghìn lần cho mỗi mẫu
+const FLAT = (() => {
+  const f = [], thr = [], l = [], r = [], p = [], roots = [];
+  const put = nd => { const k = f.length; f.push(nd.f === undefined ? -1 : nd.f); thr.push(nd.thr || 0); l.push(0); r.push(0); p.push(nd.p); if (nd.f !== undefined) { l[k] = put(nd.l); r[k] = put(nd.r); } return k; };
+  for (const t of RF) roots.push(put(t));
+  return { f: Int8Array.from(f), thr: Float64Array.from(thr), l: Int32Array.from(l), r: Int32Array.from(r), p: Float64Array.from(p), roots: Int32Array.from(roots) };
+})();
+function rfProb(x) {
+  const F = FLAT.f, T = FLAT.thr, L = FLAT.l, Rt = FLAT.r, P = FLAT.p, roots = FLAT.roots; let s = 0;
+  for (let t = 0; t < roots.length; t++) { let k = roots[t]; while (F[k] >= 0) k = x[F[k]] <= T[k] ? L[k] : Rt[k]; s += P[k]; }
+  return s / roots.length;
+}
+function rfVotes(x) {
+  const F = FLAT.f, T = FLAT.thr, L = FLAT.l, Rt = FLAT.r, P = FLAT.p, roots = FLAT.roots; let v = 0;
+  for (let t = 0; t < roots.length; t++) { let k = roots[t]; while (F[k] >= 0) k = x[F[k]] <= T[k] ? L[k] : Rt[k]; if (P[k] >= .5) v++; }
+  return v;
+}
+
+/* --- 2. Tăng cường gradient theo công thức XGBoost: mất mát logistic, đạo hàm bậc hai, điều chuẩn L2 --- */
+const XGB = (() => {
+  const X = TRAIN.X, y = TRAIN.y, n = X.length, ROUNDS = 80, DEPTH = 3, ETA = 0.2, LAMBDA = 1, MIN_H = 1;
+  const F = new Float64Array(n), g = new Float64Array(n), h = new Float64Array(n), trees = [];
+  const build = (idx, depth) => {
+    let G = 0, H = 0; for (const i of idx) { G += g[i]; H += h[i]; }
+    const node = { w: -G / (H + LAMBDA) };
+    if (depth >= DEPTH || idx.length < 10) return node;
+    let best = null; const base = G * G / (H + LAMBDA);
+    for (let f = 0; f < NF; f++) {
+      const s = idx.slice().sort((a, b) => X[a][f] - X[b][f]); let GL = 0, HL = 0;
+      for (let k = 1; k < s.length; k++) {
+        GL += g[s[k - 1]]; HL += h[s[k - 1]];
+        if (X[s[k]][f] === X[s[k - 1]][f] || HL < MIN_H || H - HL < MIN_H) continue;
+        const gain = GL * GL / (HL + LAMBDA) + (G - GL) * (G - GL) / (H - HL + LAMBDA) - base;
+        if (!best || gain > best.gain) best = { gain, f, thr: (X[s[k]][f] + X[s[k - 1]][f]) / 2 };
+      }
+    }
+    if (!best || best.gain < 1e-6) return node;
+    const lo = [], hi = []; for (const i of idx) (X[i][best.f] <= best.thr ? lo : hi).push(i);
+    node.f = best.f; node.thr = best.thr; node.l = build(lo, depth + 1); node.r = build(hi, depth + 1);
+    return node;
+  };
+  const leaf = (t, x) => { let nd = t; while (nd.f !== undefined) nd = x[nd.f] <= nd.thr ? nd.l : nd.r; return nd.w; };
+  const all = X.map((_, i) => i);
+  for (let m = 0; m < ROUNDS; m++) {
+    for (let i = 0; i < n; i++) { const p = sigmoid(F[i]); g[i] = p - y[i]; h[i] = p * (1 - p); }
+    const t = build(all, 0); trees.push(t);
+    for (let i = 0; i < n; i++) F[i] += ETA * leaf(t, X[i]);
+  }
+  return { prob: x => { let s = 0; for (const t of trees) s += ETA * leaf(t, x); return sigmoid(s); }, rounds: ROUNDS };
+})();
+
+/* --- 3. Hồi quy logistic (điều chuẩn L2, hạ gradient) và 4. SVM tuyến tính (mất mát hinge, Pegasos) --- */
+const ZTRAIN = TRAIN.X.map(zOf);
+const LR = (() => {
+  const w = new Array(NF).fill(0); let b = 0; const n = ZTRAIN.length, L2 = 0.01, RATE = 0.5;
+  for (let it = 0; it < 500; it++) {
+    const gw = new Array(NF).fill(0); let gb = 0;
+    for (let i = 0; i < n; i++) { let s = b; for (let j = 0; j < NF; j++) s += w[j] * ZTRAIN[i][j]; const e = sigmoid(s) - TRAIN.y[i]; gb += e; for (let j = 0; j < NF; j++) gw[j] += e * ZTRAIN[i][j]; }
+    for (let j = 0; j < NF; j++) w[j] -= RATE * (gw[j] / n + L2 * w[j]); b -= RATE * gb / n;
+  }
+  return { w, b, prob: x => { const z = zOf(x); let s = b; for (let j = 0; j < NF; j++) s += w[j] * z[j]; return sigmoid(s); } };
+})();
+const SVM = (() => {
+  const w = new Array(NF).fill(0); let b = 0; const n = ZTRAIN.length, LAM = 0.01;
+  for (let it = 1; it <= 800; it++) {
+    const eta = 1 / (LAM * (it + 50)), gw = new Array(NF).fill(0); let gb = 0;
+    for (let i = 0; i < n; i++) { const t = TRAIN.y[i] ? 1 : -1; let s = b; for (let j = 0; j < NF; j++) s += w[j] * ZTRAIN[i][j]; if (t * s < 1) { gb += t; for (let j = 0; j < NF; j++) gw[j] += t * ZTRAIN[i][j]; } }
+    for (let j = 0; j < NF; j++) w[j] = (1 - eta * LAM) * w[j] + eta * gw[j] / n; b += eta * gb / n;
+  }
+  return { w, b, score: x => { const z = zOf(x); let s = b; for (let j = 0; j < NF; j++) s += w[j] * z[j]; return s; } };
+})();
+
+/* --- chỉ số trên tập kiểm tra --- */
+// Đường cong ROC và AUC; các điểm số bằng nhau được gộp thành một bước (hình thang)
+function rocOf(scores, y) {
+  const n = y.length, idx = scores.map((_, i) => i).sort((a, b) => scores[b] - scores[a]);
+  let P = 0; for (const v of y) P += v; const N = n - P;
+  let tp = 0, fp = 0, auc = 0, i = 0; const pts = [[0, 0]];
+  while (i < n) {
+    let j = i, dtp = 0, dfp = 0;
+    while (j < n && scores[idx[j]] === scores[idx[i]]) { if (y[idx[j]]) dtp++; else dfp++; j++; }
+    auc += (dfp / N) * (tp + dtp / 2) / P; tp += dtp; fp += dfp; pts.push([fp / N, tp / P]); i = j;
+  }
+  return { pts, auc };
+}
+function evalModel(scores, cut) {
+  const y = TEST.y; let tp = 0, fp = 0, tn = 0, fn = 0;
+  scores.forEach((s, i) => { const pr = s >= cut ? 1 : 0; if (pr && y[i]) tp++; else if (pr) fp++; else if (y[i]) fn++; else tn++; });
+  const prec = tp / Math.max(1, tp + fp), rec = tp / Math.max(1, tp + fn), roc = rocOf(scores, y);
+  return { acc: (tp + tn) / y.length, prec, rec, f1: prec + rec ? 2 * prec * rec / (prec + rec) : 0, auc: roc.auc, roc: roc.pts, cm: { tp, fp, tn, fn } };
+}
+// Màu theo thứ tự cố định của bảng màu phân loại (đã kiểm tra tách biệt cho người mù màu trên nền tối)
+const MODELS = [
+  { key: 'rf', name: 'Random Forest', color: '#3987e5', cut: .5, fn: rfProb },
+  { key: 'xgb', name: 'XGBoost', color: '#d95926', cut: .5, fn: XGB.prob, mark: '*' },
+  { key: 'svm', name: 'SVM', color: '#199e70', cut: 0, fn: SVM.score, mark: '†' },
+  { key: 'lr', name: 'Logistic Regression', color: '#c98500', cut: .5, fn: LR.prob }
+];
+(() => {
+  const br = rng(2718), n = TEST.y.length, B = 300, boots = [];
+  for (let b = 0; b < B; b++) { const id = []; for (let i = 0; i < n; i++) id.push(Math.floor(br() * n)); boots.push(id); }
+  for (const m of MODELS) {
+    m.scores = TEST.X.map(m.fn); Object.assign(m, evalModel(m.scores, m.cut));
+    // Khoảng tin cậy 95% của AUC bằng bootstrap: lấy lại mẫu tập kiểm tra 300 lần
+    const a = boots.map(id => rocOf(id.map(i => m.scores[i]), id.map(i => TEST.y[i])).auc).sort((p, q) => p - q);
+    m.ci = [a[Math.floor(B * .025)], a[Math.ceil(B * .975) - 1]];
+  }
+})();
+const BEST = MODELS.reduce((a, m) => m.auc > a.auc + 1e-12 || (Math.abs(m.auc - a.auc) <= 1e-12 && m.f1 > a.f1) ? m : a, MODELS[0]);
+
+/* --- SHAP chính xác cho Random Forest --- */
+// Với 6 gen chỉ có 2^6 = 64 tổ hợp, nên tính được đúng giá trị Shapley thay vì xấp xỉ:
+// v(S) = xác suất trung bình khi các gen trong S lấy giá trị của mẫu, các gen còn lại lấy theo mẫu nền.
+const SHAP_W = (() => { const f = k => k <= 1 ? 1 : k * f(k - 1), w = []; for (let s = 0; s < NF; s++) w.push(f(s) * f(NF - s - 1) / f(NF)); return w; })();
+const POPC = (() => { const a = []; for (let S = 0; S < 1 << NF; S++) { let c = 0; for (let j = 0; j < NF; j++) c += S >> j & 1; a.push(c); } return a; })();
+const BG = TRAIN.X.filter((_, i) => i % 3 === 0);            // 100 mẫu nền (50 lành, 50 ung thư)
+const BG_SMALL = TRAIN.X.filter((_, i) => i % 8 === 0);      // nền nhỏ hơn cho biểu đồ toàn cảnh
+function shap(x, bg) {
+  const nS = 1 << NF, v = new Float64Array(nS), z = new Array(NF);
+  for (let S = 0; S < nS; S++) {
+    let sum = 0;
+    for (const b of bg) { for (let j = 0; j < NF; j++) z[j] = S >> j & 1 ? x[j] : b[j]; sum += rfProb(z); }
+    v[S] = sum / bg.length;
+  }
+  const phi = new Array(NF).fill(0);
+  for (let i = 0; i < NF; i++) { const bit = 1 << i; for (let S = 0; S < nS; S++) if (!(S & bit)) phi[i] += SHAP_W[POPC[S]] * (v[S | bit] - v[S]); }
+  return { base: v[0], fx: v[nS - 1], phi };
+}
+
+/* --- phân tích sống còn: Kaplan-Meier và kiểm định log-rank --- */
+// Đoàn hệ mô phỏng: 240 bệnh nhân ung thư. Giả định của mô phỏng: MMP7, CDH3 cao và GUCA2A, CLCA4, CA2 thấp
+// thì nguy cơ tử vong cao hơn. AQP8 không có tác động trực tiếp.
+const SURV_BETA = [-0.50, 0.40, -0.30, -0.10, 0, 0.30];
+const SURV = (() => {
+  const r = rng(4711), g = gaussOf(r), rows = [];
+  for (let i = 0; i < N_SURV; i++) rows.push({ x: simOne(1, r, g) });
+  const st = PG.map((p, j) => { const v = rows.map(o => o.x[j]), m = v.reduce((a, b) => a + b, 0) / v.length; return [m, Math.sqrt(v.reduce((a, b) => a + (b - m) * (b - m), 0) / v.length)]; });
+  for (const o of rows) {
+    let lp = 0; for (let j = 0; j < NF; j++) lp += SURV_BETA[j] * (o.x[j] - st[j][0]) / st[j][1];
+    const T = -Math.log(1 - r()) / (Math.LN2 / 40 * Math.exp(lp)), C = 24 + 48 * r();   // thời gian sống, thời điểm ngừng theo dõi
+    o.t = Math.min(T, C); o.e = T <= C ? 1 : 0;
+  }
+  return rows;
+})();
+const SURV_MAX = 72;
+function kmCurve(rows) {
+  const s = rows.slice().sort((a, b) => a.t - b.t); let at = s.length, S = 1, i = 0, median = null;
+  const pts = [{ t: 0, s: 1 }], cens = [];
+  while (i < s.length) {
+    const t = s[i].t; let d = 0, c = 0;
+    while (i < s.length && s[i].t === t) { if (s[i].e) d++; else c++; i++; }
+    if (d) { S *= 1 - d / at; pts.push({ t, s: S }); if (median === null && S <= .5) median = t; }
+    if (c) cens.push({ t, s: S });
+    at -= d + c;
+  }
+  return { pts, cens, median, n: rows.length, events: rows.filter(o => o.e).length };
+}
+const kmAt = (curve, t) => { let v = 1; for (const p of curve.pts) { if (p.t <= t) v = p.s; else break; } return v; };
+const atRisk = (rows, t) => rows.filter(o => o.t >= t).length;
+// erfc theo Abramowitz & Stegun 7.1.26; p của khi bình phương 1 bậc tự do = erfc(sqrt(chi2 / 2))
+function erfc(x) { const t = 1 / (1 + 0.3275911 * x); return t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-x * x); }
+function logRank(a, b) {
+  const times = Array.from(new Set(a.concat(b).filter(o => o.e).map(o => o.t))).sort((p, q) => p - q);
+  let O = 0, E = 0, V = 0;
+  for (const t of times) {
+    const n1 = a.filter(o => o.t >= t).length, n2 = b.filter(o => o.t >= t).length, n = n1 + n2;
+    const d1 = a.filter(o => o.e && o.t === t).length, d = d1 + b.filter(o => o.e && o.t === t).length;
+    if (n < 2) continue;
+    O += d1; E += d * n1 / n; V += d * (n1 / n) * (n2 / n) * (n - d) / (n - 1);
+  }
+  const chi2 = V > 0 ? (O - E) * (O - E) / V : 0;
+  return { chi2, p: erfc(Math.sqrt(chi2 / 2)), O, E };
+}
+function survSplit(j) {
+  const v = SURV.map(o => o.x[j]).sort((a, b) => a - b), cut = (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
+  const hi = SURV.filter(o => o.x[j] > cut), lo = SURV.filter(o => o.x[j] <= cut);
+  return { cut, hi, lo, kHi: kmCurve(hi), kLo: kmCurve(lo), test: logRank(hi, lo) };
+}
+
+/* ---------- khởi động ---------- */
+setCond(0); updVolcano(); updSig();
+new ResizeObserver(resize).observe(cv); resize();
+if ('IntersectionObserver' in window) new IntersectionObserver(es => { visible = es[0].isIntersecting && !document.hidden; }).observe(cv);
+document.addEventListener('visibilitychange', () => { if (document.hidden) visible = false; else { const r = cv.getBoundingClientRect(); visible = r.bottom > 0 && r.top < window.innerHeight; } });
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { widths.clear(); drawROC(); });
+requestAnimationFrame(frame);
+
+/* ---------- giao diện: nhập dữ liệu ---------- */
+const MAX_FILE = 2 * 1024 * 1024;
+const PRESET = { normal: [8.8, 2.4, 7.9, 9.4, 6.5, 2.7], tumor: [4.1, 6.0, 3.2, 5.9, 2.4, 5.6], hard: [7.0, 3.6, 6.4, 8.4, 5.2, 4.0] };
+const PRESET_NAME = { normal: 'mẫu thử giống mô lành', tumor: 'mẫu thử giống mô ung thư', hard: 'mẫu thử khó phân loại' };
+const CLS = { t: 'Giống mô ung thư', n: 'Giống mô lành', m: 'Ở giữa hai nhóm' };
+const C_HI = '#e66767', C_LO = '#3987e5', C_MID = '#8b93a8', GRID = '#222d50';
+const gin = PG.map(p => ({ r: $('#rg-' + p.g), n: $('#in-' + p.g) }));
+let inputSrc = 'mẫu ví dụ có sẵn', lastX = null, lastShap = null, showRes = false, curView = 'predict';
+function setSrc(t) { inputSrc = t; $('#srcNote').textContent = 'Dữ liệu sẽ dự đoán: ' + t + '.'; }
+function setMsg(el, kind, text) { el.className = 'status' + (kind ? ' ' + kind : ''); el.textContent = text; }
+function fillForm(x) { x.forEach((v, i) => { const c = clamp(v, 0, PMAX); gin[i].r.value = c; gin[i].n.value = Math.round(c * 100) / 100; }); }
+function readForm() {
+  const x = [];
+  for (let i = 0; i < NF; i++) {
+    const v = parseFloat(String(gin[i].n.value).replace(',', '.'));
+    if (!isFinite(v) || v < 0 || v > PMAX) return { err: PG[i].g };
+    x.push(v);
+  }
+  return { x };
+}
+gin.forEach(o => {
+  o.r.addEventListener('input', () => { o.n.value = o.r.value; setSrc('số bạn vừa nhập'); });
+  o.n.addEventListener('input', () => { const v = parseFloat(o.n.value); if (isFinite(v)) o.r.value = clamp(v, 0, PMAX); setSrc('số bạn vừa nhập'); });
+});
+$$('.presets button').forEach(b => b.addEventListener('click', () => { fillForm(PRESET[b.dataset.preset]); setMsg($('#formMsg'), '', ''); setSrc(PRESET_NAME[b.dataset.preset]); }));
+
+// Đọc tệp: CSV, TSV hoặc Excel. Chấp nhận dấu phân cách , ; tab và số thập phân viết bằng dấu phẩy.
+function toNum(c) {
+  if (typeof c === 'number') return isFinite(c) ? c : null;
+  let t = String(c == null ? '' : c).trim().replace(/^["']|["']$/g, '').replace(/\s/g, '');
+  if (t === '') return null;
+  if (/^-?\d+,\d+$/.test(t)) t = t.replace(',', '.');
+  return /^-?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(t) ? parseFloat(t) : null;
+}
+function parseDelimited(text) {
+  const lines = text.replace(/^﻿/, '').split(/\r\n|\n|\r/).filter(l => l.trim() !== '');
+  if (!lines.length) throw new Error('tệp trống.');
+  let delim = null, best = 0;
+  for (const d of ['\t', ';', ',']) { const c = lines.slice(0, 8).reduce((a, l) => a + l.split(d).length - 1, 0); if (c > best) { best = c; delim = d; } }
+  return lines.map(l => delim ? l.split(delim) : l.trim().split(/\s+/));
+}
+function extractGenes(rows) {
+  const idx = new Map(PG.map((p, i) => [p.g, i]));
+  const key = c => String(c == null ? '' : c).trim().replace(/^["']|["']$/g, '').toUpperCase();
+  const found = new Array(NF).fill(null); let other = 0, more = 0;
+  rows.forEach((row, ri) => {            // dạng hàng: cột đầu là tên gen
+    if (!row || !row.length) return; const k = key(row[0]);
+    if (!idx.has(k)) { if (ri > 0) other++; return; }
+    const nums = Array.from(row).slice(1).map(toNum).filter(v => v !== null);
+    if (nums.length && found[idx.get(k)] === null) { found[idx.get(k)] = nums[0]; more = Math.max(more, nums.length - 1); }
+  });
+  if (found.every(v => v === null)) {    // dạng cột: một hàng tên gen, hàng ngay dưới là giá trị
+    other = 0;
+    for (let r = 0; r < rows.length - 1; r++) {
+      const cols = Array.from(rows[r] || []).map(key);
+      if (cols.filter(c => idx.has(c)).length < Math.ceil(NF / 2)) continue;
+      cols.forEach((c, ci) => { if (idx.has(c)) { const v = toNum((rows[r + 1] || [])[ci]); if (v !== null) found[idx.get(c)] = v; } });
+      more = Math.max(0, rows.length - r - 2); break;
+    }
+  }
+  const missing = PG.filter((p, i) => found[i] === null).map(p => p.g);
+  if (missing.length === NF) throw new Error(`không thấy gen nào của bộ biomarker. Tệp cần một cột tên gen (${PG.map(p => p.g).join(', ')}) và một cột giá trị.`);
+  if (missing.length) throw new Error(`thiếu giá trị của gen ${missing.join(', ')}.`);
+  return { x: found, other, more };
+}
+function getXLSX() {
+  return new Promise((res, rej) => {
+    const t0 = Date.now(), fail = () => rej(new Error('không tải được bộ đọc Excel (cần có mạng). Hãy lưu tệp dưới dạng CSV rồi tải lên lại.'));
+    (function poll() { if (window.XLSX) return res(window.XLSX); if (window.__xlsxFail || Date.now() - t0 > 8000) return fail(); setTimeout(poll, 150); })();
+  });
+}
+async function handleFile(file) {
+  const msg = $('#fileMsg'), name = file.name || 'tệp';
+  setMsg(msg, '', 'Đang đọc ' + name + '…');
+  try {
+    if (file.size > MAX_FILE) throw new Error('tệp lớn hơn 2 MB. Trang này chỉ nhận tệp nhỏ chứa giá trị của sáu gen biomarker, không nhận dữ liệu thô.');
+    const ext = (name.split('.').pop() || '').toLowerCase(); let rows;
+    if (ext === 'xlsx' || ext === 'xls') {
+      const X = await getXLSX(), wb = X.read(await file.arrayBuffer(), { type: 'array' });
+      rows = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+    } else rows = parseDelimited(await file.text());
+    const got = extractGenes(rows); let x = got.x;
+    if ($('#rawTpm').checked) {
+      if (x.some(v => v < 0)) throw new Error('TPM không thể là số âm.');
+      x = x.map(v => Math.log2(v + 1));
+    }
+    const bad = PG.filter((p, i) => x[i] < 0 || x[i] > PMAX).map(p => p.g);
+    if (bad.length) throw new Error(`giá trị của ${bad.join(', ')} nằm ngoài thang 0 đến ${PMAX}. Nếu tệp chứa TPM thô, hãy đánh dấu ô "Tệp chứa TPM thô" rồi tải lại.`);
+    fillForm(x); setMsg($('#formMsg'), '', ''); setSrc('tệp ' + name);
+    let note = `Đã đọc ${name}: đủ ${NF}/${NF} gen.`;
+    if (got.other > 0) note += ` Bỏ qua ${got.other} dòng không thuộc bộ gen.`;
+    if (got.more > 0) note += ` Tệp có ${got.more + 1} mẫu, trang dùng mẫu đầu tiên.`;
+    setMsg(msg, 'ok', note + ' Kiểm tra sáu giá trị ở phần nhập trực tiếp, rồi bấm Dự đoán.');
+  } catch (err) { setMsg(msg, 'bad', 'Không dùng được ' + name + ': ' + (err && err.message ? err.message : 'tệp không đúng định dạng.')); }
+}
+const drop = $('#drop');
+['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('is-over'); }));
+['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('is-over'); }));
+drop.addEventListener('drop', e => { const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) handleFile(f); });
+$('#file').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) handleFile(f); e.target.value = ''; });
+const SAMPLE_NAME = 'mau_benh_nhan.csv', sampleText = () => $('#sampleCsv').textContent.trim() + '\n';
+$('#trySample').addEventListener('click', () => handleFile(new File([sampleText()], SAMPLE_NAME, { type: 'text/csv' })));
+$('#copySample').addEventListener('click', async e => {
+  const b = e.currentTarget;
+  try { await navigator.clipboard.writeText(sampleText()); b.textContent = 'Đã chép'; }
+  catch (_) { const rg = document.createRange(); rg.selectNodeContents($('#sampleCsv')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); b.textContent = 'Đã bôi đen, nhấn Ctrl+C'; }
+  setTimeout(() => { b.textContent = 'Chép nội dung'; }, 2400);
+});
+// Nút tải tệp mẫu chỉ hiện khi trang được phép lưu tệp
+let saver = null;
+function askSaver() {
+  if (saver || !window.claude || typeof window.claude.use !== 'function') return;
+  window.claude.use('downloads').then(ns => { if (ns && typeof ns.save === 'function') { saver = ns; $('#dlSample').hidden = false; } }).catch(() => {});
+}
+askSaver(); window.addEventListener('load', askSaver); setTimeout(askSaver, 1500);
+$('#dlSample').addEventListener('click', () => {
+  if (!saver) return;
+  saver.save({ filename: SAMPLE_NAME, data: sampleText() })
+    .then(() => setMsg($('#fileMsg'), 'ok', 'Đã lưu ' + SAMPLE_NAME + '. Mở bằng Excel để sửa số rồi tải lên lại.'))
+    .catch(err => { if (err && err.code === 'declined') return; setMsg($('#fileMsg'), 'bad', 'Không lưu được tệp mẫu ở chế độ xem này. Hãy dùng nút Chép nội dung.'); });
+});
+// Nếu bộ đọc Excel không tải được (mất mạng), nói rõ ngay trên ô chọn tệp
+function xlsxState() {
+  if (!window.__xlsxFail || window.XLSX) return;
+  $('.drop-main').textContent = 'Chọn tệp CSV';
+  $('.drop-sub').textContent = 'Bộ đọc Excel chưa tải được ở đây, hãy dùng tệp CSV, tối đa 2 MB';
+}
+window.addEventListener('load', xlsxState); setTimeout(xlsxState, 4000);
+
+/* ---------- công cụ vẽ biểu đồ (SVG) ---------- */
+const NS = 'http://www.w3.org/2000/svg';
+function sv(tag, attrs, parent, text) { const e = document.createElementNS(NS, tag); if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; if (parent) parent.appendChild(e); return e; }
+function el(tag, cls, parent, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; if (parent) parent.appendChild(e); return e; }
+function mount(host, height, label) {
+  host.textContent = '';
+  const w = Math.max(240, Math.floor(host.clientWidth));
+  return { svg: sv('svg', { width: w, height, viewBox: `0 0 ${w} ${height}`, role: 'img', 'aria-label': label }, host), w, h: height };
+}
+// Một ô chú giải nổi cho mỗi biểu đồ: giá trị in đậm trước, tên theo sau
+function showTip(host, x, y, build) {
+  let t = host.querySelector('.tip'); if (!t) t = el('div', 'tip', host);
+  t.textContent = ''; build(t); t.hidden = false;
+  const w = host.clientWidth, tw = t.offsetWidth, th = t.offsetHeight;
+  let L = x + 14; if (L + tw > w - 4) L = x - tw - 14; if (L < 4) L = 4;
+  let T = y - th - 12; if (T < 4) T = y + 16;
+  t.style.left = L + 'px'; t.style.top = T + 'px';
+}
+function hideTip(host) { const t = host.querySelector('.tip'); if (t) t.hidden = true; }
+function tipHead(t, text) { el('div', 'tip-h', t, text); }
+function tipRow(t, color, value, label, shape) { const r = el('div', 'tip-r', t); const k = el('i', 'key ' + (shape || 'ln'), r); k.style.background = color; el('b', null, r, value); el('span', null, r, label); }
+const pct = (v, d) => vi(v * 100, d == null ? 0 : d) + '%';
+const tick = v => String(Math.round(v * 100) / 100).replace('.', ',');
+const signed = (v, d) => (v >= 0 ? '+' : '−') + vi(Math.abs(v), d);
+function legendOf(host, items, shape) {
+  host.textContent = '';
+  for (const it of items) { const li = el('li', null, host); const k = el('i', 'key ' + (shape || 'ln'), li); k.style.background = it.color; el('span', null, li, it.label); }
+}
+
+/* ---------- màn hình kết quả ---------- */
+const pctOf = v => clamp(v, 0, PMAX) / PMAX * 100;
+const bandHTML = (cls, m) => { const a = pctOf(m[0] - m[1]), b = pctOf(m[0] + m[1]); return `<i class="band ${cls}" style="left:${a.toFixed(2)}%;width:${(b - a).toFixed(2)}%"></i>`; };
+// Mỗi gen nghiêng về nhóm nào: so khả năng của giá trị dưới hai phân bố tham chiếu của tập huấn luyện
+function geneCall(i, v) {
+  const N = STAT[0][i], T = STAT[1][i], ll = m => -Math.log(m[1]) - (v - m[0]) * (v - m[0]) / (2 * m[1] * m[1]), llr = ll(T) - ll(N);
+  const d = v - N[0], f = Math.pow(2, Math.abs(d)), ft = f >= 10 ? String(Math.round(f)) : vi(f, 1);
+  return { cls: llr > 0.7 ? 't' : llr < -0.7 ? 'n' : 'm', dir: Math.abs(d) < 1 ? '≈ Tương đương' : d > 0 ? `↑ Cao hơn khoảng ${ft} lần` : `↓ Thấp hơn khoảng ${ft} lần`, short: Math.abs(d) < 1 ? 'gần mức mô lành' : d > 0 ? `cao hơn mô lành khoảng ${ft} lần` : `thấp hơn mô lành khoảng ${ft} lần` };
+}
+// Biểu đồ thác SHAP: đi từ mức nền tới xác suất của mẫu, mỗi gen một bậc
+function drawWaterfall(host, x, sh) {
+  const order = PG.map((p, i) => i).sort((a, b) => Math.abs(sh.phi[b]) - Math.abs(sh.phi[a]));
+  const rowH = 32, m = { l: 112, r: 64, t: 34, b: 44 }, c = mount(host, m.t + rowH * NF + m.b, 'Biểu đồ thác SHAP của mẫu vừa nhập'), pw = c.w - m.l - m.r;
+  const steps = []; let cur = sh.base; for (const i of order) { steps.push({ i, a: cur, b: cur + sh.phi[i] }); cur += sh.phi[i]; }
+  let lo = Math.min(sh.base, sh.fx), hi = Math.max(sh.base, sh.fx); for (const s of steps) { lo = Math.min(lo, s.a, s.b); hi = Math.max(hi, s.a, s.b); }
+  const pad = Math.max(.03, (hi - lo) * .08); lo = Math.max(0, lo - pad); hi = Math.min(1, hi + pad);
+  const X = v => m.l + (v - lo) / (hi - lo) * pw, y0 = m.t, yEnd = m.t + rowH * NF;
+  const step = [.05, .1, .2, .25, .5].find(s => (hi - lo) / s <= (pw < 240 ? 3 : 6)) || .5;
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + 1e-9; v += step) {
+    sv('line', { x1: X(v), x2: X(v), y1: y0, y2: yEnd, stroke: GRID }, c.svg);
+    sv('text', { x: X(v), y: yEnd + 16, 'text-anchor': 'middle', class: 'ax' }, c.svg, pct(v));
+  }
+  sv('text', { x: m.l + pw / 2, y: yEnd + 36, 'text-anchor': 'middle', class: 'ax' }, c.svg, 'Xác suất nguy cơ cao');
+  sv('line', { x1: X(sh.base), x2: X(sh.base), y1: y0 - 6, y2: y0 + rowH / 2, stroke: C_MID }, c.svg);
+  sv('text', { x: clamp(X(sh.base), m.l + 40, c.w - 60), y: y0 - 12, 'text-anchor': 'middle', class: 'lb' }, c.svg, 'Mức nền ' + pct(sh.base, 1));
+  steps.forEach((s, k) => {
+    const y = y0 + k * rowH + rowH / 2, xa = X(s.a), xb = X(s.b), up = sh.phi[s.i] >= 0;
+    sv('text', { x: m.l - 54, y: y + 4, 'text-anchor': 'end', class: 'gn' }, c.svg, PG[s.i].g);
+    sv('text', { x: m.l - 12, y: y + 4, 'text-anchor': 'end', class: 'ax' }, c.svg, '= ' + vi(x[s.i], 1));
+    const bar = sv('rect', { x: Math.min(xa, xb), y: y - 8, width: Math.max(2, Math.abs(xb - xa)), height: 16, rx: 3, fill: up ? C_HI : C_LO }, c.svg);
+    if (k < steps.length - 1) sv('line', { x1: xb, x2: xb, y1: y + 8, y2: y + rowH - 8, stroke: C_MID }, c.svg);
+    const lab = signed(sh.phi[s.i] * 100, 1), right = Math.max(xa, xb) + 6;
+    if (right + 44 < c.w) sv('text', { x: right, y: y + 4, class: 'lb' }, c.svg, lab); else sv('text', { x: Math.min(xa, xb) - 6, y: y + 4, 'text-anchor': 'end', class: 'lb' }, c.svg, lab);
+    const hit = sv('rect', { x: 0, y: y - rowH / 2, width: c.w, height: rowH, fill: 'transparent', tabindex: 0, 'aria-label': `${PG[s.i].g} bằng ${vi(x[s.i], 1)}, SHAP ${lab} điểm` }, c.svg);
+    const on = () => { bar.setAttribute('opacity', .78); showTip(host, (xa + xb) / 2, y - 8, t => { tipHead(t, `${PG[s.i].g} = ${vi(x[s.i], 1)}`); tipRow(t, up ? C_HI : C_LO, lab + ' điểm', up ? 'đẩy về nguy cơ cao' : 'kéo về lành tính', 'sq'); tipRow(t, C_MID, pct(s.a, 1) + ' → ' + pct(s.b, 1), 'xác suất trước và sau gen này', 'sq'); }); };
+    const off = () => { bar.setAttribute('opacity', 1); hideTip(host); };
+    hit.addEventListener('pointermove', on); hit.addEventListener('pointerleave', off); hit.addEventListener('focus', on); hit.addEventListener('blur', off);
+  });
+  sv('line', { x1: X(sh.fx), x2: X(sh.fx), y1: yEnd - rowH / 2, y2: yEnd + 2, stroke: '#e9edf8' }, c.svg);
+}
+// Biểu đồ tổng hợp SHAP: mỗi chấm là một mẫu kiểm tra, màu theo giá trị của gen
+let GLOBAL = null, globalBusy = false; const globalWait = [];
+function ensureGlobal(cb) {
+  if (GLOBAL) return cb();
+  globalWait.push(cb); if (globalBusy) return; globalBusy = true;
+  const idx = TEST.X.map((_, i) => i).filter(i => i % 4 === 0), acc = []; let k = 0;
+  (function chunk() {
+    const t0 = performance.now();
+    while (k < idx.length && performance.now() - t0 < 24) { const x = TEST.X[idx[k]]; acc.push({ x, phi: shap(x, BG).phi }); k++; }
+    if (k < idx.length) return setTimeout(chunk, 0);
+    GLOBAL = acc; globalBusy = false; globalWait.splice(0).forEach(f => f());
+  })();
+}
+function swarmColor(z) { const t = clamp(Math.abs(z) / 1.6, 0, 1), a = [139, 147, 168], b = z >= 0 ? [230, 103, 103] : [57, 135, 229]; return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',')})`; }
+function drawSwarm(host) {
+  if (!GLOBAL) { host.textContent = ''; el('p', 'note', host, 'Đang tính SHAP cho 100 mẫu kiểm tra…'); return; }
+  const mean = PG.map((p, j) => GLOBAL.reduce((a, s) => a + Math.abs(s.phi[j]), 0) / GLOBAL.length);
+  const order = PG.map((p, i) => i).sort((a, b) => mean[b] - mean[a]);
+  const rowH = 38, m = { l: 74, r: 16, t: 8, b: 44 }, c = mount(host, m.t + rowH * NF + m.b, 'Biểu đồ tổng hợp SHAP trên 100 mẫu kiểm tra'), pw = c.w - m.l - m.r;
+  let mx = 0; for (const s of GLOBAL) for (const v of s.phi) mx = Math.max(mx, Math.abs(v)); mx = Math.ceil(mx * 100 / 5) * 5 / 100;
+  const X = v => m.l + (v + mx) / (2 * mx) * pw, yEnd = m.t + rowH * NF, step = mx > .2 ? .1 : .05;
+  for (let v = -Math.floor(mx / step) * step; v <= mx + 1e-9; v += step) {
+    const zero = Math.abs(v) < 1e-9;
+    sv('line', { x1: X(v), x2: X(v), y1: m.t, y2: yEnd, stroke: zero ? C_MID : GRID }, c.svg);
+    sv('text', { x: X(v), y: yEnd + 16, 'text-anchor': 'middle', class: 'ax' }, c.svg, zero ? '0' : signed(v * 100, 0));
+  }
+  sv('text', { x: m.l + pw / 2, y: yEnd + 36, 'text-anchor': 'middle', class: 'ax' }, c.svg, 'Giá trị SHAP (điểm phần trăm)');
+  const dots = [];
+  order.forEach((j, k) => {
+    const yc = m.t + k * rowH + rowH / 2, bins = new Map();
+    sv('text', { x: m.l - 12, y: yc + 4, 'text-anchor': 'end', class: 'gn' }, c.svg, PG[j].g);
+    for (const s of GLOBAL) {
+      const px = X(s.phi[j]), b = Math.round(px / 5), n = bins.get(b) || 0; bins.set(b, n + 1);
+      const py = yc + clamp((n % 2 ? 1 : -1) * Math.ceil(n / 2) * 4.6, -rowH / 2 + 4, rowH / 2 - 4);
+      sv('circle', { cx: px, cy: py, r: 2.7, fill: swarmColor((s.x[j] - SCALE[j][0]) / SCALE[j][1]), 'fill-opacity': .92 }, c.svg);
+      dots.push({ px, py, j, v: s.x[j], phi: s.phi[j] });
+    }
+    if (lastShap) { const px = X(clamp(lastShap.phi[j], -mx, mx)); sv('circle', { cx: px, cy: yc, r: 6.5, fill: 'none', stroke: '#ffc44d', 'stroke-width': 2 }, c.svg); }
+  });
+  const ring = sv('circle', { r: 5, fill: 'none', stroke: '#e9edf8', 'stroke-width': 1.5, visibility: 'hidden' }, c.svg);
+  c.svg.addEventListener('pointermove', e => {
+    const r = c.svg.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top; let best = null, bd = 18 * 18;
+    for (const d of dots) { const q = (d.px - x) * (d.px - x) + (d.py - y) * (d.py - y); if (q < bd) { bd = q; best = d; } }
+    if (!best) { ring.setAttribute('visibility', 'hidden'); return hideTip(host); }
+    ring.setAttribute('cx', best.px); ring.setAttribute('cy', best.py); ring.setAttribute('visibility', 'visible');
+    showTip(host, best.px, best.py, t => { tipHead(t, `${PG[best.j].g} = ${vi(best.v, 1)}`); tipRow(t, best.phi >= 0 ? C_HI : C_LO, signed(best.phi * 100, 1) + ' điểm', best.phi >= 0 ? 'đẩy về nguy cơ cao' : 'kéo về lành tính', 'sq'); });
+  });
+  c.svg.addEventListener('pointerleave', () => { ring.setAttribute('visibility', 'hidden'); hideTip(host); });
+}
+function renderResults() {
+  const x = lastX, p = rfProb(x), votes = rfVotes(x), hi = p >= .5, sh = lastShap;
+  const pT = p > .995 ? '>99' : p < .005 ? '<1' : String(Math.round(p * 100));
+  const pN = p > .995 ? '<1' : p < .005 ? '>99' : String(100 - Math.round(p * 100));
+  const calls = x.map((v, i) => geneCall(i, v)), cnt = c => calls.filter(k => k.cls === c).length, nT = cnt('t'), nN = cnt('n'), nM = cnt('m');
+  $('#resSrc').textContent = 'Nguồn dữ liệu: ' + inputSrc + '.';
+  // Kết luận
+  const card = $('#result'); card.classList.toggle('hi', hi); card.classList.toggle('lo', !hi);
+  $('#vMain').textContent = hi ? 'Nguy cơ cao' : 'Lành tính';
+  $('#pNum').textContent = pT + '%';
+  $('#splitT').style.width = (p * 100).toFixed(1) + '%'; $('#splitN').style.width = ((1 - p) * 100).toFixed(1) + '%';
+  $('#keyT').textContent = 'Nguy cơ cao ' + pT + '%'; $('#keyN').textContent = 'Lành tính ' + pN + '%';
+  $('#split').setAttribute('aria-label', `Nguy cơ cao ${pT}%, lành tính ${pN}%`);
+  const lead = p >= .8 ? 'Mô hình xếp mẫu này vào nhóm nguy cơ cao.' : p <= .2 ? 'Mô hình xếp mẫu này vào nhóm lành tính.' : 'Mẫu nằm gần ranh giới giữa hai nhóm, nên kết quả này chưa chắc chắn.';
+  const tally = `${nT}/${NF} gen có mức biểu hiện giống mô ung thư, ${nN}/${NF} gen giống mô lành` + (nM ? `, ${nM} gen ở giữa hai nhóm.` : '.');
+  $('#why').textContent = `${lead} ${votes}/${N_TREES} cây quyết định nghiêng về nguy cơ cao. ${tally.charAt(0).toUpperCase() + tally.slice(1)}`;
+  const rf = MODELS[0];
+  $('#modelNote').textContent = `Mô hình minh họa: Random Forest ${N_TREES} cây, huấn luyện ngay trong trình duyệt trên ${2 * N_TRAIN} mẫu mô phỏng. Trên ${2 * N_TEST} mẫu kiểm tra mô phỏng khác: độ chính xác ${pct(rf.acc, 1)}, AUC ${vi(rf.auc, 3)}. Đây chưa phải mô hình huấn luyện từ dữ liệu GEO hoặc TCGA thật, nên không dùng để chẩn đoán.`;
+  // SHAP
+  drawWaterfall($('#shapFall'), x, sh);
+  const order = PG.map((g, i) => i).sort((a, b) => Math.abs(sh.phi[b]) - Math.abs(sh.phi[a])), ul = $('#shapText'); ul.textContent = '';
+  const up = order.filter(i => sh.phi[i] >= 0.005), down = order.filter(i => sh.phi[i] <= -0.005);
+  $('#shapLead').textContent = `Mức nền của mô hình là ${pct(sh.base, 1)}, tức xác suất trung bình trên 100 mẫu nền. Sáu gen của mẫu này cộng thêm ${signed((sh.fx - sh.base) * 100, 1)} điểm, đưa xác suất tới ${pct(sh.fx, 1)}.` +
+    (up.length ? ` Đẩy về nguy cơ cao mạnh nhất là ${up.slice(0, 2).map(i => PG[i].g).join(' và ')}.` : '') + (down.length ? ` Kéo về lành tính mạnh nhất là ${down.slice(0, 2).map(i => PG[i].g).join(' và ')}.` : '');
+  for (const i of order) {
+    const li = el('li', null, ul), k = el('i', 'sq ' + (sh.phi[i] >= 0 ? 't' : 'n'), li), sp = el('span', null, li);
+    el('b', null, sp, `${PG[i].g} = ${vi(x[i], 1)}`); sp.appendChild(document.createTextNode(` (${calls[i].short}): ${sh.phi[i] >= 0 ? 'đẩy về nguy cơ cao' : 'kéo về lành tính'}, ${signed(sh.phi[i] * 100, 1)} điểm.`));
+  }
+  drawSwarm($('#shapSwarm')); ensureGlobal(() => { if (curView === 'predict' && showRes) drawSwarm($('#shapSwarm')); });
+  // Từng gen
+  $('#geneSum').textContent = tally.charAt(0).toUpperCase() + tally.slice(1);
+  $('#gbody').innerHTML = PG.map((g, i) => `<tr><th scope="row">${g.g}</th>` +
+    `<td class="num c-val" data-l="Giá trị">${vi(x[i], 1)}</td>` +
+    `<td data-l="So với mô lành">${calls[i].dir}</td>` +
+    `<td class="trk" data-l="Vị trí trên thang 0 đến 15"><span class="rtrack">${bandHTML('n', STAT[0][i])}${bandHTML('t', STAT[1][i])}<i class="mark" style="left:${pctOf(x[i]).toFixed(2)}%"></i></span></td>` +
+    `<td class="num c-shap" data-l="SHAP">${signed(sh.phi[i] * 100, 1)}</td>` +
+    `<td data-l="Nhận định"><span class="pill ${calls[i].cls}">${CLS[calls[i].cls]}</span></td></tr>`).join('');
+  // Tế bào trong cảnh 3D phát mRNA theo mẫu vừa nhập
+  const rate = (i, a, b) => clamp(a + (x[i] - PG[i].n[0]) / (PG[i].t[0] - PG[i].n[0]) * (b - a), .04, 1);
+  GENES[0].sample = rate(1, GENES[0].healthy, GENES[0].disease);
+  GENES[2].sample = rate(0, GENES[2].healthy, GENES[2].disease);
+  GENES[1].sample = GENES[1].healthy;
+  setCond(2);
+}
+
+/* ---------- trang so sánh mô hình ---------- */
+let rocUid = 0;
+function drawRoc(host, d, label) {
+  const size = clamp(host.clientWidth * .86, 250, 400), m = { l: 58, r: 14, t: 10, b: 44 }, c = mount(host, size, label), pw = c.w - m.l - m.r, ph = c.h - m.t - m.b;
+  const X = v => m.l + (v - d.x0) / (d.x1 - d.x0) * pw, Y = v => m.t + ph - (v - d.y0) / (d.y1 - d.y0) * ph;
+  const cid = 'rocclip' + (++rocUid); sv('rect', { x: m.l, y: m.t, width: pw, height: ph }, sv('clipPath', { id: cid }, sv('defs', null, c.svg)));
+  for (let i = 0; i <= 4; i++) {
+    const vx = d.x0 + (d.x1 - d.x0) * i / 4, vy = d.y0 + (d.y1 - d.y0) * i / 4;
+    sv('line', { x1: X(vx), x2: X(vx), y1: m.t, y2: m.t + ph, stroke: GRID }, c.svg); sv('line', { x1: m.l, x2: m.l + pw, y1: Y(vy), y2: Y(vy), stroke: GRID }, c.svg);
+    sv('text', { x: X(vx), y: m.t + ph + 16, 'text-anchor': 'middle', class: 'ax' }, c.svg, tick(vx));
+    sv('text', { x: m.l - 8, y: Y(vy) + 4, 'text-anchor': 'end', class: 'ax' }, c.svg, tick(vy));
+  }
+  sv('text', { x: m.l + pw / 2, y: c.h - 8, 'text-anchor': 'middle', class: 'ax' }, c.svg, 'Tỉ lệ dương tính giả (1 − độ đặc hiệu)');
+  sv('text', { x: 12, y: m.t + ph / 2, 'text-anchor': 'middle', class: 'ax', transform: `rotate(-90 12 ${m.t + ph / 2})` }, c.svg, 'Độ nhạy');
+  const g = sv('g', { 'clip-path': `url(#${cid})` }, c.svg);
+  sv('line', { x1: X(0), y1: Y(0), x2: X(1), y2: Y(1), stroke: C_MID, 'stroke-dasharray': '4 4' }, g);
+  for (const mdl of MODELS.slice().reverse()) sv('polyline', { points: mdl.roc.map(p => X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1)).join(' '), fill: 'none', stroke: mdl.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, g);
+  const cross = sv('line', { y1: m.t, y2: m.t + ph, stroke: '#e9edf8', 'stroke-opacity': .55, visibility: 'hidden' }, c.svg);
+  const tprAt = (mdl, f) => { let v = 0; for (const p of mdl.roc) { if (p[0] <= f + 1e-9) v = p[1]; else break; } return v; };
+  const hit = sv('rect', { x: m.l, y: m.t, width: pw, height: ph, fill: 'transparent' }, c.svg);
+  hit.addEventListener('pointermove', e => {
+    const r = c.svg.getBoundingClientRect(), px = clamp(e.clientX - r.left, m.l, m.l + pw), f = d.x0 + (px - m.l) / pw * (d.x1 - d.x0);
+    cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.setAttribute('visibility', 'visible');
+    showTip(host, px, e.clientY - r.top, t => { tipHead(t, 'Dương tính giả ' + pct(f, 0)); for (const mdl of MODELS) tipRow(t, mdl.color, pct(tprAt(mdl, f), 1), 'độ nhạy, ' + mdl.name); });
+  });
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); hideTip(host); });
+}
+function renderModels() {
+  const cols = ['acc', 'prec', 'rec', 'f1', 'auc'], best = cols.map(k => Math.max(...MODELS.map(m => m[k]))), tb = $('#mbody'); tb.textContent = '';
+  for (const m of MODELS) {
+    const tr = el('tr', m.key === 'rf' ? 'used' : null, tb), th = el('th', null, tr); th.scope = 'row';
+    const k = el('i', 'key ln', th); k.style.background = m.color; el('span', null, th, m.name + (m.mark || ''));
+    if (m.key === 'rf') el('em', 'tag', th, 'đang dùng để dự đoán');
+    cols.forEach((c, ci) => { const td = el('td', 'num' + (Math.abs(m[c] - best[ci]) < 1e-9 ? ' best' : ''), tr, c === 'auc' ? vi(m.auc, 3) : pct(m[c], 1)); if (c === 'auc') el('small', null, td, ` (${vi(m.ci[0], 3)} đến ${vi(m.ci[1], 3)})`); });
+  }
+  drawRoc($('#rocFull'), { x0: 0, x1: 1, y0: 0, y1: 1 }, 'Đường cong ROC của bốn mô hình trên tập kiểm tra');
+  drawRoc($('#rocZoom'), { x0: 0, x1: .4, y0: .6, y1: 1 }, 'Phóng to góc trên bên trái của đường cong ROC');
+  legendOf($('#rocLegend'), MODELS.map(m => ({ color: m.color, label: `${m.name}${m.mark || ''}, AUC ${vi(m.auc, 3)}` })).concat([{ color: C_MID, label: 'Đoán ngẫu nhiên, AUC 0,5' }]));
+  const rf = MODELS[0], overlap = (a, b) => a.ci[0] <= b.ci[1] && b.ci[0] <= a.ci[1], v = $('#mverdict');
+  if (BEST === rf) {
+    const second = MODELS.filter(m => m !== rf).sort((a, b) => b.auc - a.auc)[0];
+    v.textContent = `Trên tập kiểm tra này, Random Forest có AUC cao nhất (${vi(rf.auc, 3)}), nhỉnh hơn ${second.name} (${vi(second.auc, 3)}). ` + (overlap(rf, second) ? 'Khoảng tin cậy 95% của hai mô hình chồng lên nhau, nên chưa thể nói Random Forest hơn hẳn.' : 'Khoảng tin cậy 95% của hai mô hình không chồng lên nhau, nên khác biệt này đáng kể.');
+  } else {
+    v.textContent = `Trên bộ dữ liệu mô phỏng này, ${BEST.name} có AUC cao nhất (${vi(BEST.auc, 3)}). Random Forest đạt ${vi(rf.auc, 3)}, thấp hơn ${vi((BEST.auc - rf.auc) * 100, 1)} điểm phần trăm. ` + (overlap(rf, BEST) ? 'Khoảng tin cậy 95% của hai mô hình chồng lên nhau, nên chênh lệch này nằm trong sai số: bốn mô hình cho kết quả gần như tương đương.' : 'Khoảng tin cậy 95% của hai mô hình không chồng lên nhau, nên chênh lệch này đáng kể.');
+  }
+  $('#mdata').textContent = `Dữ liệu: ${2 * N_TRAIN} mẫu huấn luyện và ${2 * N_TEST} mẫu kiểm tra mô phỏng, mỗi tập chia đôi giữa mô ung thư và mô lành. Mọi chỉ số dưới đây được tính ngay trong trình duyệt, trên tập kiểm tra mà mô hình chưa từng thấy.`;
+}
+
+/* ---------- trang tiên lượng sống ---------- */
+function drawKM(host, sp, gene) {
+  const m = { l: 60, r: 54, t: 12, b: 44 }, c = mount(host, clamp(host.clientWidth * .56, 250, 380), `Đường cong Kaplan-Meier theo mức biểu hiện ${gene}`), pw = c.w - m.l - m.r, ph = c.h - m.t - m.b;
+  const X = t => m.l + t / SURV_MAX * pw, Y = s => m.t + ph - s * ph;
+  for (let t = 0; t <= SURV_MAX; t += 12) { sv('line', { x1: X(t), x2: X(t), y1: m.t, y2: m.t + ph, stroke: GRID }, c.svg); sv('text', { x: X(t), y: m.t + ph + 16, 'text-anchor': 'middle', class: 'ax' }, c.svg, String(t)); }
+  for (let s = 0; s <= 1.001; s += .25) { sv('line', { x1: m.l, x2: m.l + pw, y1: Y(s), y2: Y(s), stroke: GRID }, c.svg); sv('text', { x: m.l - 8, y: Y(s) + 4, 'text-anchor': 'end', class: 'ax' }, c.svg, pct(s)); }
+  sv('text', { x: m.l + pw / 2, y: c.h - 8, 'text-anchor': 'middle', class: 'ax' }, c.svg, 'Thời gian theo dõi (tháng)');
+  sv('text', { x: 12, y: m.t + ph / 2, 'text-anchor': 'middle', class: 'ax', transform: `rotate(-90 12 ${m.t + ph / 2})` }, c.svg, 'Tỉ lệ còn sống');
+  const ends = [];
+  for (const [k, rows, col, name] of [[sp.kLo, sp.lo, C_LO, 'Thấp'], [sp.kHi, sp.hi, C_HI, 'Cao']]) {
+    const last = Math.max(...rows.map(o => o.t)); let dpath = `M${X(0)},${Y(1)}`, s = 1;
+    for (const p of k.pts.slice(1)) { dpath += `H${X(p.t).toFixed(1)}V${Y(p.s).toFixed(1)}`; s = p.s; }
+    dpath += `H${X(last).toFixed(1)}`;
+    sv('path', { d: dpath, fill: 'none', stroke: col, 'stroke-width': 2, 'stroke-linejoin': 'round' }, c.svg);
+    for (const q of k.cens) sv('line', { x1: X(q.t), x2: X(q.t), y1: Y(q.s) - 4, y2: Y(q.s) + 4, stroke: col, 'stroke-width': 1.2 }, c.svg);
+    ends.push({ y: Y(s), x: X(last), name });
+  }
+  if (Math.abs(ends[0].y - ends[1].y) >= 14) for (const e of ends) sv('text', { x: Math.max(ends[0].x, ends[1].x) + 8, y: e.y + 4, class: 'lb' }, c.svg, e.name);
+  const cross = sv('line', { y1: m.t, y2: m.t + ph, stroke: '#e9edf8', 'stroke-opacity': .55, visibility: 'hidden' }, c.svg);
+  const hit = sv('rect', { x: m.l, y: m.t, width: pw, height: ph, fill: 'transparent' }, c.svg);
+  hit.addEventListener('pointermove', e => {
+    const r = c.svg.getBoundingClientRect(), px = clamp(e.clientX - r.left, m.l, m.l + pw), t = Math.round((px - m.l) / pw * SURV_MAX);
+    cross.setAttribute('x1', X(t)); cross.setAttribute('x2', X(t)); cross.setAttribute('visibility', 'visible');
+    showTip(host, X(t), e.clientY - r.top, tp => { tipHead(tp, `Tháng ${t}`); tipRow(tp, C_HI, pct(kmAt(sp.kHi, t), 1), `còn sống, nhóm cao (còn theo dõi ${atRisk(sp.hi, t)})`); tipRow(tp, C_LO, pct(kmAt(sp.kLo, t), 1), `còn sống, nhóm thấp (còn theo dõi ${atRisk(sp.lo, t)})`); });
+  });
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); hideTip(host); });
+}
+function renderKM() {
+  const j = +$('#kmGene').value, g = PG[j].g, sp = survSplit(j), p = sp.test.p;
+  const pTxt = p < 0.0001 ? '< 0,0001' : vi(p, p < 0.01 ? 4 : 3), med = k => k.median === null ? 'chưa đạt' : vi(k.median, 1) + ' tháng';
+  $('#kmP').textContent = pTxt; $('#kmMedHi').textContent = med(sp.kHi); $('#kmMedLo').textContent = med(sp.kLo);
+  $('#kmN').textContent = `${SURV.length} / ${SURV.filter(o => o.e).length}`;
+  drawKM($('#kmFig'), sp, g);
+  legendOf($('#kmLegend'), [{ color: C_HI, label: `${g} cao hơn trung vị (${sp.hi.length} bệnh nhân, ${sp.kHi.events} biến cố)` }, { color: C_LO, label: `${g} bằng hoặc thấp hơn trung vị (${sp.lo.length} bệnh nhân, ${sp.kLo.events} biến cố)` }, { color: C_MID, label: 'Vạch đứng nhỏ: bệnh nhân ngừng theo dõi (kiểm duyệt)' }]);
+  const worse = sp.test.O > sp.test.E ? 'cao' : 'thấp';
+  $('#kmRead').textContent = p < 0.05
+    ? `Hai đường cong khác nhau có ý nghĩa thống kê (kiểm định log-rank, χ² = ${vi(sp.test.chi2, 2)}, p ${p < 0.0001 ? pTxt : '= ' + pTxt}). Nhóm ${g} ${worse} có thời gian sống ngắn hơn.`
+    : `Chưa đủ bằng chứng là hai nhóm khác nhau (kiểm định log-rank, χ² = ${vi(sp.test.chi2, 2)}, p = ${pTxt}, lớn hơn 0,05). Với ${g}, mức biểu hiện cao hay thấp không tách được tiên lượng trong đoàn hệ này.`;
+  const tb = $('#kmRisk'); tb.textContent = '';
+  const hr = el('tr', null, el('thead', null, tb)); el('th', null, hr, 'Còn theo dõi, tháng').scope = 'col'; for (let t = 0; t <= SURV_MAX; t += 12) el('th', 'num', hr, String(t)).scope = 'col';
+  const body = el('tbody', null, tb);
+  for (const [rows, col, name] of [[sp.hi, C_HI, 'Nhóm cao'], [sp.lo, C_LO, 'Nhóm thấp']]) { const tr = el('tr', null, body), th = el('th', null, tr); th.scope = 'row'; const k = el('i', 'key ln', th); k.style.background = col; el('span', null, th, name); for (let t = 0; t <= SURV_MAX; t += 12) el('td', 'num', tr, String(atRisk(rows, t))); }
+  $('#kmSample').textContent = lastX
+    ? `Mẫu vừa nhập có ${g} = ${vi(lastX[j], 1)}, tức thuộc nhóm biểu hiện ${lastX[j] > sp.cut ? 'cao' : 'thấp'} (ngưỡng trung vị ${vi(sp.cut, 1)}). Đây chỉ là vị trí của mẫu so với đoàn hệ mô phỏng, không phải tiên lượng cho một người cụ thể.`
+    : `Ngưỡng chia nhóm là trung vị của ${g} trong đoàn hệ: ${vi(sp.cut, 1)}. Sau khi bạn dự đoán một mẫu, trang sẽ cho biết mẫu đó thuộc nhóm nào.`;
+}
+$('#kmGene').addEventListener('change', renderKM);
+
+/* ---------- trang con đường sinh học ---------- */
+// Chỉ ghi các chú giải đã đối chiếu với KEGG, Gene Ontology, GeneCards, Human Protein Atlas (xem phần nguồn)
+const TERMS = [
+  { db: 'KEGG', id: 'hsa04310', n: 'Wnt signaling pathway', vn: 'Tín hiệu Wnt', genes: ['MMP7'] },
+  { db: 'KEGG', id: 'hsa04972', n: 'Pancreatic secretion', vn: 'Bài tiết dịch tụy', genes: ['CLCA4', 'CA2'] },
+  { db: 'KEGG', id: 'hsa04976', n: 'Bile secretion', vn: 'Bài tiết mật', genes: ['CA2'] },
+  { db: 'KEGG', id: 'hsa04924', n: 'Renin secretion', vn: 'Bài tiết renin', genes: ['CLCA4'] },
+  { db: 'KEGG', id: 'hsa04964', n: 'Proximal tubule bicarbonate reclamation', vn: 'Tái hấp thu bicarbonat', genes: ['CA2'] },
+  { db: 'KEGG', id: 'hsa00910', n: 'Nitrogen metabolism', vn: 'Chuyển hóa nitơ', genes: ['CA2'] },
+  { db: 'KEGG', id: 'hsa04514', n: 'Cell adhesion molecules', vn: 'Phân tử kết dính tế bào', genes: ['CDH3'] },
+  { db: 'GO', id: 'GO:0022617', n: 'Extracellular matrix disassembly', vn: 'Phân giải chất nền ngoại bào', genes: ['MMP7'] },
+  { db: 'GO', id: 'GO:0030574', n: 'Collagen catabolic process', vn: 'Dị hóa collagen', genes: ['MMP7'] },
+  { db: 'GO', id: 'GO:0030250', n: 'Guanylate cyclase activator activity', vn: 'Hoạt hóa guanylate cyclase', genes: ['GUCA2A'] },
+  { db: 'GO', id: 'GO:0015250', n: 'Water channel activity', vn: 'Kênh dẫn nước', genes: ['AQP8'] },
+  { db: 'GO', id: 'GO:0035377', n: 'Transepithelial water transport', vn: 'Vận chuyển nước qua biểu mô', genes: ['AQP8'] },
+  { db: 'GO', id: '', n: 'Chloride transmembrane transport', vn: 'Vận chuyển clorua qua màng', genes: ['CLCA4'] },
+  { db: 'GO', id: 'GO:0007156', n: 'Homophilic cell adhesion via plasma membrane adhesion molecules', vn: 'Kết dính tế bào cùng loại', genes: ['CDH3'] }
+];
+function renderPathway() {
+  const tb = $('#pmat'); tb.textContent = '';
+  const hr = el('tr', null, el('thead', null, tb)); el('th', null, hr, 'Con đường hoặc thuật ngữ').scope = 'col'; for (const p of PG) el('th', 'gcol', hr, p.g).scope = 'col';
+  const body = el('tbody', null, tb); let db = '';
+  for (const t of TERMS) {
+    if (t.db !== db) { db = t.db; const g = el('tr', 'grp', body), th = el('th', null, g, db === 'KEGG' ? 'Con đường KEGG' : 'Thuật ngữ Gene Ontology'); th.colSpan = NF + 1; th.scope = 'colgroup'; }
+    const tr = el('tr', null, body), th = el('th', null, tr); th.scope = 'row';
+    el('span', 'tn', th, t.n); el('span', 'tv', th, t.vn + (t.id ? ' · ' + t.id : ''));
+    for (const p of PG) { const td = el('td', 'gcol', tr); if (t.genes.includes(p.g)) { el('i', 'dotm', td); el('span', 'sr', td, 'có'); } }
+  }
+  // Tình trạng của từng gen ở mẫu vừa nhập
+  $$('#pgenes [data-gene]').forEach(td => {
+    td.textContent = ''; const i = PG.findIndex(p => p.g === td.dataset.gene);
+    if (!lastX) { td.textContent = 'Chưa có mẫu'; td.classList.add('muted'); return; }
+    td.classList.remove('muted'); const c = geneCall(i, lastX[i]); el('span', 'pill ' + c.cls, td, CLS[c.cls]);
+  });
+  $('#pSample').textContent = lastX ? 'Cột cuối cho biết từng gen ở mẫu vừa nhập đang giống mô lành hay mô ung thư.' : 'Sau khi bạn dự đoán một mẫu, cột cuối sẽ cho biết từng gen ở mẫu đó đang giống mô lành hay mô ung thư.';
+}
+
+/* ---------- điều hướng giữa các trang ---------- */
+const ROUTES = { 'du-doan': 'predict', 'mo-hinh': 'models', 'song-con': 'survival', 'con-duong': 'pathway', 'mo-phong': 'sim' };
+function paint() {
+  if (curView === 'predict') { $('#scr-in').hidden = showRes; $('#scr-out').hidden = !showRes; if (showRes) renderResults(); }
+  else if (curView === 'models') renderModels();
+  else if (curView === 'survival') renderKM();
+  else if (curView === 'pathway') renderPathway();
+  else if (curView === 'sim') requestAnimationFrame(() => { resize(); Object.assign(cam, goal); });
+}
+function showView(name, keepScroll) {
+  curView = name;
+  $$('.pg').forEach(v => { v.hidden = v.id !== 'v-' + name; });
+  $$('.tabs a').forEach(a => { if (a.dataset.view === name) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+  if (name !== 'sim') stopTour();
+  paint(); if (!keepScroll) window.scrollTo(0, 0);
+}
+function route() { const name = ROUTES[location.hash.replace('#', '')] || 'predict'; if (name !== curView) showView(name); }
+window.addEventListener('hashchange', route);
+$('#pform').addEventListener('submit', e => {
+  e.preventDefault(); const r = readForm();
+  if (r.err) { setMsg($('#formMsg'), 'bad', `Giá trị của ${r.err} phải là một số từ 0 đến ${PMAX}.`); return; }
+  setMsg($('#formMsg'), '', ''); lastX = r.x; lastShap = shap(r.x, BG); showRes = true;
+  showView('predict'); try { $('#h-out').focus({ preventScroll: true }); } catch (_) {}
+});
+$('#btnBack').addEventListener('click', () => { showRes = false; showView('predict'); try { $('#h-in').focus({ preventScroll: true }); } catch (_) {} });
+// Vẽ lại biểu đồ khi khung trang đổi bề rộng
+let paintW = 0, paintT = 0;
+new ResizeObserver(es => { const w = Math.round(es[0].contentRect.width); if (w === paintW) return; paintW = w; clearTimeout(paintT); paintT = setTimeout(() => { if (curView !== 'sim') paint(); }, 120); }).observe($('.page'));
+setTimeout(() => ensureGlobal(() => {}), 600);
+{ const name = ROUTES[location.hash.replace('#', '')] || 'predict'; showView(name, true); }
+
+})();
+</script>
+</body>
+</html>
